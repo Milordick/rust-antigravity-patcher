@@ -218,7 +218,6 @@ prepare_binary() {
 
     # Fallback: Download prebuilt binary from GitHub Release
     local download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-${PLATFORM}-${ARCH}"
-    local legacy_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/open-ag-patcher-${PLATFORM}-${ARCH}"
     local checksums_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/checksums.txt"
 
     local tmp_download
@@ -227,10 +226,10 @@ prepare_binary() {
     tmp_checksums="$(mktemp)"
 
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$download_url" -o "$tmp_download" || curl -fsSL "$legacy_url" -o "$tmp_download"
+        curl -fsSL "$download_url" -o "$tmp_download"
         curl -fsSL "$checksums_url" -o "$tmp_checksums" 2>/dev/null || true
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$tmp_download" "$download_url" || wget -qO "$tmp_download" "$legacy_url"
+        wget -qO "$tmp_download" "$download_url"
         wget -qO "$tmp_checksums" "$checksums_url" 2>/dev/null || true
     else
         rm -f "$tmp_download" "$tmp_checksums"

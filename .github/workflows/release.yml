@@ -116,13 +116,6 @@ jobs:
         run: |
           mkdir -p upload
           find release_artifacts -type f -exec cp {} upload/ \;
-          for f in upload/agyptch-*; do
-            base="$(basename "$f")"
-            legacy="upload/${base/agyptch-/open-ag-patcher-}"
-            if [ ! -f "$legacy" ]; then
-              cp "$f" "$legacy"
-            fi
-          done
           # Generate SHA-256 checksums file for supply-chain integrity verification
           (
             cd upload
