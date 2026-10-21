@@ -130,7 +130,100 @@ impl AgyGates {
 pub struct AgyStatus {
     pub exists: bool,
     pub is_patched: bool,
+    pub is_android: bool,
     pub file_size: u64,
+}
+
+pub fn is_android_aarch64(data: &[u8]) -> bool {
+    if data.len() < 64 || &data[..4] != b"\x7fELF" {
+        return false;
+    }
+    if data[4] != 2 || data[5] != 1 {
+        return false;
+    }
+    let machine = u16::from_le_bytes([data[18], data[19]]);
+    if machine != 0xB7 {
+        return false;
+    }
+    let head_limit = data.len().min(65536);
+    let head = &data[..head_limit];
+    memchr::memmem::find(head, b"Android").is_some()
+        || memchr::memmem::find(head, b".note.android.ident").is_some()
+        || memchr::memmem::find(head, b"/system/bin/linker64").is_some()
+}
+
+pub struct TermuxGate {
+    pub unpatched_re: regex::bytes::Regex,
+    pub patched_re: regex::bytes::Regex,
+}
+
+impl TermuxGate {
+    pub fn new() -> Result<Self, regex::Error> {
+        let unpatched_re = regex::bytes::RegexBuilder::new(
+            r"(?-u)\xe0[\x00-\xff]\x00\xf9...\xb5...\xb4....([\x41\x42]..\x37)...[\x94-\x97]",
+        )
+        .dot_matches_new_line(true)
+        .build()?;
+
+        let patched_re = regex::bytes::RegexBuilder::new(
+            r"(?-u)\xe0[\x00-\xff]\x00\xf9...\xb5...\xb4.......\x14...[\x94-\x97]",
+        )
+        .dot_matches_new_line(true)
+        .build()?;
+
+        Ok(Self {
+            unpatched_re,
+            patched_re,
+        })
+    }
+
+    /// Resolves status and returns (GateStatus, Vec<(offset, [u8; 4])>)
+    pub fn resolve(
+        &self,
+        data: &[u8],
+        bounds: Option<crate::core::bounds::CodeBounds>,
+    ) -> Result<(GateStatus, Vec<(usize, [u8; 4])>), String> {
+        let (start, end) = match bounds {
+            Some(b) => (b.start.min(data.len()), b.end.min(data.len())),
+            None => (0, data.len()),
+        };
+        let slice = &data[start..end];
+
+        // 1. Check if already patched
+        let mut patched_offsets = Vec::new();
+        for m in self.patched_re.find_iter(slice) {
+            patched_offsets.push(start + m.start() + 16);
+        }
+        if patched_offsets.len() > 1 {
+            return Err("Termux gate matched more than once (corrupted/unsupported build?)".to_string());
+        }
+        if !patched_offsets.is_empty() {
+            return Ok((GateStatus::Patched, Vec::new()));
+        }
+
+        // 2. Check unpatched
+        let mut unpatched = Vec::new();
+        for m in self.unpatched_re.find_iter(slice) {
+            let tbnz_offset = start + m.start() + 16;
+            if tbnz_offset + 4 <= data.len() {
+                let tbnz_bytes: [u8; 4] = data[tbnz_offset..tbnz_offset + 4].try_into().unwrap();
+                let insn = u32::from_le_bytes(tbnz_bytes);
+                let imm14 = (insn >> 5) & 0x3fff;
+                let b_insn = 0x1400_0000 | (imm14 & 0x03ff_ffff);
+                let b_bytes = b_insn.to_le_bytes();
+                unpatched.push((tbnz_offset, b_bytes));
+            }
+        }
+
+        if unpatched.len() > 1 {
+            return Err("Termux gate matched more than once (corrupted/unsupported build?)".to_string());
+        }
+        if unpatched.is_empty() {
+            return Err("Termux/Android arm64 gate signature not found (unsupported agy build?)".to_string());
+        }
+
+        Ok((GateStatus::Unpatched, unpatched))
+    }
 }
 
 pub fn check_agy_status(path: &Path) -> AgyStatus {
@@ -138,6 +231,7 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
         return AgyStatus {
             exists: false,
             is_patched: false,
+            is_android: false,
             file_size: 0,
         };
     }
@@ -148,6 +242,7 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
             return AgyStatus {
                 exists: true,
                 is_patched: false,
+                is_android: false,
                 file_size: 0,
             }
         }
@@ -159,9 +254,11 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
         if let Some(arr) = val.as_array() {
             if !arr.is_empty() {
                 let state = arr[0].as_str().unwrap_or("");
+                let is_android = arr.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
                 return AgyStatus {
                     exists: true,
                     is_patched: state == "patched",
+                    is_android,
                     file_size: sz,
                 };
             }
@@ -174,6 +271,7 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
             return AgyStatus {
                 exists: true,
                 is_patched: false,
+                is_android: false,
                 file_size: sz,
             }
         }
@@ -185,42 +283,61 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
             return AgyStatus {
                 exists: true,
                 is_patched: false,
+                is_android: false,
                 file_size: sz,
             }
         }
     };
 
-    let arch = detect_arch(&mmap);
+    let is_android = is_android_aarch64(&mmap);
     let bounds = get_code_bounds(&mmap);
-    let gates = match AgyGates::new() {
-        Ok(g) => g,
-        Err(_) => {
-            return AgyStatus {
-                exists: true,
-                is_patched: false,
-                file_size: sz,
+
+    let is_patched = if is_android {
+        let termux_gate = match TermuxGate::new() {
+            Ok(g) => g,
+            Err(_) => {
+                return AgyStatus {
+                    exists: true,
+                    is_patched: false,
+                    is_android,
+                    file_size: sz,
+                }
             }
-        }
-    };
-
-    // Check Gate 1
-    let g1 = gates.cli_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
-    // Check Gate 2
-    let g2 = gates.auth_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
-    // Check Gate 3 (x64 only, on arm64 skip or treat as ok)
-    let g3 = if arch == Arch::X64 {
-        gates.print_gate.find(&mmap, Some(arch), Some(1), bounds).map(|(s, _)| s == GateStatus::Patched).unwrap_or(false)
+        };
+        let res = termux_gate.resolve(&mmap, bounds)
+            .or_else(|_| termux_gate.resolve(&mmap, None));
+        res.map(|(s, _)| s == GateStatus::Patched).unwrap_or(false)
     } else {
-        true
+        let arch = detect_arch(&mmap);
+        let gates = match AgyGates::new() {
+            Ok(g) => g,
+            Err(_) => {
+                return AgyStatus {
+                    exists: true,
+                    is_patched: false,
+                    is_android,
+                    file_size: sz,
+                }
+            }
+        };
+
+        let g1 = gates.cli_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
+        let g2 = gates.auth_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
+        let g3 = if arch == Arch::X64 {
+            gates.print_gate.find(&mmap, Some(arch), Some(1), bounds).map(|(s, _)| s == GateStatus::Patched).unwrap_or(false)
+        } else {
+            true
+        };
+        g1 && g2 && g3
     };
 
-    let is_patched = g1 && g2 && g3;
     let state_str = if is_patched { "patched" } else { "unpatched" };
-    put_cached(path, serde_json::json!([state_str, null]));
+    put_cached(path, serde_json::json!([state_str, null, is_android]));
 
     AgyStatus {
         exists: true,
         is_patched,
+        is_android,
         file_size: sz,
     }
 }
@@ -233,44 +350,56 @@ pub fn apply_agy_patch(path: &Path) -> Result<bool, String> {
     let f = File::open(path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
     let mmap = unsafe { Mmap::map(&f) }.map_err(|e| format!("cannot mmap {}: {}", path.display(), e))?;
 
-    let arch = detect_arch(&mmap);
     let bounds = get_code_bounds(&mmap);
-    let gates = AgyGates::new().map_err(|e| e.to_string())?;
+    let is_android = is_android_aarch64(&mmap);
 
-    let mut patches = Vec::new();
+    let patches_to_apply: Vec<(usize, Vec<u8>)> = if is_android {
+        let termux_gate = TermuxGate::new().map_err(|e| e.to_string())?;
+        let (status, dynamic_patches) = termux_gate.resolve(&mmap, bounds)
+            .or_else(|_| termux_gate.resolve(&mmap, None))?;
+        if status == GateStatus::Patched {
+            return Ok(false);
+        }
+        dynamic_patches.into_iter().map(|(off, bytes)| (off, bytes.to_vec())).collect()
+    } else {
+        let arch = detect_arch(&mmap);
+        let gates = AgyGates::new().map_err(|e| e.to_string())?;
 
-    // 1. Gate 1
-    let (s1, off1, _) = gates.cli_gate.resolve(&mmap, Some(arch), bounds)?;
-    if s1 != GateStatus::Patched {
-        let fix: &[u8] = match arch {
-            Arch::Arm64 => b"\x21\x00\x80\x52",
-            _ => b"\x48\x85\xc0\x90",
-        };
-        patches.push((off1, fix));
-    }
+        let mut patches = Vec::new();
+        // 1. Gate 1
+        let (s1, off1, _) = gates.cli_gate.resolve(&mmap, Some(arch), bounds)?;
+        if s1 != GateStatus::Patched {
+            let fix: &[u8] = match arch {
+                Arch::Arm64 => b"\x21\x00\x80\x52",
+                _ => b"\x48\x85\xc0\x90",
+            };
+            patches.push((off1, fix.to_vec()));
+        }
 
-    // 2. Gate 2
-    let (s2, off2, _) = gates.auth_gate.resolve(&mmap, Some(arch), bounds)?;
-    if s2 != GateStatus::Patched {
-        let fix: &[u8] = match arch {
-            Arch::Arm64 => b"\x23\x00\x80\x52\x03\x20\x00\x39",
-            _ => b"\xc6\x40\x08\x01\x90\x90",
-        };
-        patches.push((off2, fix));
-    }
+        // 2. Gate 2
+        let (s2, off2, _) = gates.auth_gate.resolve(&mmap, Some(arch), bounds)?;
+        if s2 != GateStatus::Patched {
+            let fix: &[u8] = match arch {
+                Arch::Arm64 => b"\x23\x00\x80\x52\x03\x20\x00\x39",
+                _ => b"\xc6\x40\x08\x01\x90\x90",
+            };
+            patches.push((off2, fix.to_vec()));
+        }
 
-    // 3. Gate 3 (x64)
-    if arch == Arch::X64 {
-        if let Ok((s3, offsets)) = gates.print_gate.find(&mmap, Some(arch), None, bounds) {
-            if s3 != GateStatus::Patched {
-                for off in offsets {
-                    patches.push((off, b"\x48\x85\xc9\x90" as &[u8]));
+        // 3. Gate 3 (x64)
+        if arch == Arch::X64 {
+            if let Ok((s3, offsets)) = gates.print_gate.find(&mmap, Some(arch), None, bounds) {
+                if s3 != GateStatus::Patched {
+                    for off in offsets {
+                        patches.push((off, b"\x48\x85\xc9\x90".to_vec()));
+                    }
                 }
             }
         }
-    }
+        patches
+    };
 
-    if patches.is_empty() {
+    if patches_to_apply.is_empty() {
         return Ok(false); // already fully patched
     }
 
@@ -280,7 +409,8 @@ pub fn apply_agy_patch(path: &Path) -> Result<bool, String> {
     // Backup
     make_backup(path, BAK_EXT).map_err(|e| format!("backup failed: {}", e))?;
 
-    fast_apply_patches(path, &patches).map_err(|e| format!("write patch failed: {}", e))?;
+    let patch_refs: Vec<(usize, &[u8])> = patches_to_apply.iter().map(|(off, b)| (*off, b.as_slice())).collect();
+    fast_apply_patches(path, &patch_refs).map_err(|e| format!("write patch failed: {}", e))?;
 
     drop_cached(path);
     Ok(true)
@@ -299,7 +429,12 @@ pub fn find_agy_binary() -> Option<PathBuf> {
     let home = std::env::var("HOME").unwrap_or_default();
     let home_path = Path::new(&home);
 
+    let prefix = std::env::var("PREFIX").unwrap_or_default();
+    let prefix_path = Path::new(&prefix);
+
     let candidates = [
+        prefix_path.join("bin/agy"),
+        PathBuf::from("/data/data/com.termux/files/usr/bin/agy"),
         home_path.join(".local/bin/agy"),
         PathBuf::from("/usr/local/bin/agy"),
         PathBuf::from("/usr/bin/agy"),
