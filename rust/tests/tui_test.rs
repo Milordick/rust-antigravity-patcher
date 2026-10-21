@@ -147,8 +147,8 @@ fn test_fullscreen_mouse_tab_clicks() {
 
 #[test]
 fn test_small_terminal_resize_guard() {
-    // When terminal is shrunk below 50x12, it must not panic and render the guard message
-    let backend = TestBackend::new(40, 10);
+    // When terminal is shrunk below 28x7, it must not panic and render the guard message
+    let backend = TestBackend::new(20, 5);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut state = AppState::new();
 
@@ -156,6 +156,40 @@ fn test_small_terminal_resize_guard() {
         draw_ui(f, &mut state);
     });
     assert!(res.is_ok(), "Small terminal should render guard cleanly without panic");
+}
+
+#[test]
+fn test_mobile_termux_layouts() {
+    // Smartphone / Termux dimensions in portrait and landscape
+    let mobile_sizes = [
+        (40, 16), // Typical Termux portrait with keyboard
+        (45, 20), // Standard smartphone portrait
+        (55, 24), // Large smartphone / small tablet
+        (35, 12), // Narrow split view on mobile
+        (70, 18), // Termux landscape
+    ];
+
+    let mut state = AppState::new();
+
+    for (w, h) in mobile_sizes {
+        let backend = TestBackend::new(w, h);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        for tab in Tab::ALL {
+            state.current_tab = tab;
+            state.clickables.clear();
+
+            let res = terminal.draw(|f| {
+                draw_ui(f, &mut state);
+            });
+            assert!(res.is_ok(), "Must render mobile tab {:?} cleanly at {}x{}", tab, w, h);
+            assert!(
+                !state.clickables.is_empty(),
+                "Tab {:?} must have touchable hitboxes on mobile at {}x{}",
+                tab, w, h
+            );
+        }
+    }
 }
 
 #[test]

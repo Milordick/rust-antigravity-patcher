@@ -34,6 +34,19 @@ pub fn format_bytes(bytes: u64) -> String {
 }
 
 pub fn print_banner() {
+    let (cols, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    if cols < 52 {
+        println!();
+        println!("  {CYAN}┌────────────────────────────────────────┐{RESET}");
+        println!("  {CYAN}│{RESET} {BOLD}{WHITE}Open AG Patcher (Rust){RESET}          {CYAN}v1.4.0 │{RESET}");
+        println!("  {CYAN}│{RESET} Region bypass for Antigravity         {CYAN}│{RESET}");
+        println!("  {CYAN}├────────────────────────────────────────┤{RESET}");
+        println!("  {CYAN}│{RESET} Coshick (Author) • AvenCores (Upstream){CYAN}│{RESET}");
+        println!("  {CYAN}└────────────────────────────────────────┘{RESET}");
+        println!();
+        return;
+    }
+
     println!();
     println!("  {CYAN}╔═══════════════════════════════════════════════╗{RESET}");
     println!("  {CYAN}║{RESET}  {BOLD}{WHITE}Open AG Patcher (Rust Edition){RESET}          {CYAN}v1.4.0 ║{RESET}");
@@ -49,11 +62,21 @@ pub fn print_banner() {
 }
 
 pub fn print_section(title: &str) {
-    println!("  {CYAN}─ {title} ─────────────────────────────────────────{RESET}");
+    let (cols, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let line_len = (cols as usize).saturating_sub(title.len() + 6).min(42).max(2);
+    println!("  {CYAN}─ {title} {}{RESET}", "─".repeat(line_len));
 }
 
 pub fn print_row(num: &str, title: &str, desc: &str, col: &str) {
-    println!("  {col}[{num}]{RESET}  {BOLD}{title:<28}{RESET}  {DIM}{desc}{RESET}");
+    let (cols, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    if cols < 65 {
+        println!("  {col}[{num}]{RESET} {BOLD}{title}{RESET}");
+        if !desc.is_empty() {
+            println!("      {DIM}{desc}{RESET}");
+        }
+    } else {
+        println!("  {col}[{num}]{RESET}  {BOLD}{title:<28}{RESET}  {DIM}{desc}{RESET}");
+    }
 }
 
 pub fn print_target_info(

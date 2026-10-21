@@ -80,6 +80,26 @@ impl Tab {
             Tab::About => "5. О программе",
         }
     }
+
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            Tab::Targets => "1.Цели",
+            Tab::Paths => "2.Пути",
+            Tab::Logs => "3.Логи",
+            Tab::Updates => "4.Обнов",
+            Tab::About => "5.Инфо",
+        }
+    }
+
+    pub fn tiny_name(&self) -> &'static str {
+        match self {
+            Tab::Targets => "1",
+            Tab::Paths => "2",
+            Tab::Logs => "3",
+            Tab::Updates => "4",
+            Tab::About => "5",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1028,21 +1048,21 @@ fn execute_focused_button(state: &mut AppState, btn_idx: usize) {
 pub fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
     let area = f.area();
 
-    // Responsive guard for small/resizing terminals
-    if area.width < 50 || area.height < 12 {
+    // Responsive guard for ultra-small terminals (< 28x7)
+    if area.width < 28 || area.height < 7 {
         let msg = vec![
             Line::from(Span::styled(
-                "Окно терминала слишком мало",
+                "Терминал слишком мал",
                 Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("Текущий размер: ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled("Размер: ", Style::default().fg(MD_TEXT_LOW)),
                 Span::styled(format!("{}x{}", area.width, area.height), Style::default().fg(MD_PRIMARY)),
             ]),
             Line::from(vec![
-                Span::styled("Минимальный размер: ", Style::default().fg(MD_TEXT_LOW)),
-                Span::styled("50x12", Style::default().fg(MD_TEXT_HIGH)),
+                Span::styled("Мин: ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled("28x7", Style::default().fg(MD_TEXT_HIGH)),
             ]),
         ];
         let block = Block::default()
@@ -1053,18 +1073,24 @@ pub fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
         return;
     }
 
-    // Material Design 3 Layout:
-    // 1. Top App Bar (Header) -> 3 rows
-    // 2. Navigation Tabs Bar -> 3 rows
-    // 3. Main Viewport -> Min 12 rows
-    // 4. Bottom System Bar (Footer) -> 3 rows
+    // Material Design 3 Responsive Layout:
+    // When height < 22 (common in Termux / mobile screens with keyboard):
+    // Use 1-row compact header, 1-row compact tabs bar, 1-row footer.
+    // When height >= 22 (desktop / large terminal):
+    // Use 3 rows with rounded cards for header, tabs, and footer.
+    let (header_h, tabs_h, footer_h) = if area.height < 22 {
+        (1, 1, 1)
+    } else {
+        (3, 3, 3)
+    };
+
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(12),
-            Constraint::Length(3),
+            Constraint::Length(header_h),
+            Constraint::Length(tabs_h),
+            Constraint::Min(4),
+            Constraint::Length(footer_h),
         ])
         .split(area);
 
@@ -1087,61 +1113,115 @@ pub fn draw_ui(f: &mut ratatui::Frame, state: &mut AppState) {
 }
 
 fn draw_header(f: &mut ratatui::Frame, area: Rect, state: &AppState) {
-    let time_str = current_time_str();
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BORDER_ROUNDED)
-        .border_style(style_border_normal());
+    let is_compact = area.height < 3;
+    let inner = if is_compact {
+        area
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BORDER_ROUNDED)
+            .border_style(style_border_normal());
+        let in_rect = block.inner(area);
+        f.render_widget(block, area);
+        in_rect
+    };
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
 
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Min(30),
-            Constraint::Length(22),
-        ])
-        .split(inner);
+    if inner.width < 45 {
+        // Ultra-narrow (Termux portrait / small screen)
+        let left_spans = vec![
+            Span::styled("Open AG Patcher", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+        ];
+        let right_spans = vec![
+            Span::styled("● ", Style::default().fg(get_breathing_color(state.tick))),
+            Span::styled(format!("v{}", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
+        ];
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(16),
+                Constraint::Length(9),
+            ])
+            .split(inner);
+        f.render_widget(Paragraph::new(Line::from(left_spans)), cols[0]);
+        f.render_widget(Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right), cols[1]);
+    } else if inner.width < 75 {
+        // Medium narrow
+        let left_spans = vec![
+            Span::styled("Open AG Patcher ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("v{} ", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
+            Span::styled("• Rust", Style::default().fg(MD_TEXT_MED)),
+        ];
+        let right_spans = vec![
+            Span::styled("● ", Style::default().fg(get_breathing_color(state.tick))),
+            Span::styled("Активен", Style::default().fg(MD_TEXT_HIGH)),
+        ];
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(24),
+                Constraint::Length(12),
+            ])
+            .split(inner);
+        f.render_widget(Paragraph::new(Line::from(left_spans)), cols[0]);
+        f.render_widget(Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right), cols[1]);
+    } else {
+        // Full desktop width
+        let time_str = current_time_str();
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(30),
+                Constraint::Length(22),
+            ])
+            .split(inner);
 
-    let left_spans = vec![
-        Span::styled(
-            " Open AG Patcher ",
-            Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!("v{} ", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
-        Span::styled("• Rust Native ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("• Разблокировка региона Antigravity", Style::default().fg(MD_TEXT_LOW)),
-    ];
-    f.render_widget(Paragraph::new(Line::from(left_spans)), cols[0]);
+        let left_spans = vec![
+            Span::styled(" Open AG Patcher ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("v{} ", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
+            Span::styled("• Rust Native ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("• Разблокировка региона Antigravity", Style::default().fg(MD_TEXT_LOW)),
+        ];
+        f.render_widget(Paragraph::new(Line::from(left_spans)), cols[0]);
 
-    // Animated breathing status indicator
-    let right_spans = vec![
-        Span::styled("● ", Style::default().fg(get_breathing_color(state.tick))),
-        Span::styled("Активен  ", Style::default().fg(MD_TEXT_HIGH)),
-        Span::styled(format!("[ {} ] ", time_str), Style::default().fg(MD_TEXT_LOW)),
-    ];
-    f.render_widget(
-        Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right),
-        cols[1],
-    );
+        let right_spans = vec![
+            Span::styled("● ", Style::default().fg(get_breathing_color(state.tick))),
+            Span::styled("Активен  ", Style::default().fg(MD_TEXT_HIGH)),
+            Span::styled(format!("[ {} ] ", time_str), Style::default().fg(MD_TEXT_LOW)),
+        ];
+        f.render_widget(Paragraph::new(Line::from(right_spans)).alignment(Alignment::Right), cols[1]);
+    }
 }
 
 fn draw_tabs_bar(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BORDER_ROUNDED)
-        .border_style(style_border_normal());
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let is_compact = area.height < 3;
+    let inner = if is_compact {
+        area
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BORDER_ROUNDED)
+            .border_style(style_border_normal());
+        let in_rect = block.inner(area);
+        f.render_widget(block, area);
+        in_rect
+    };
 
     if inner.width == 0 || inner.height == 0 {
         return;
     }
 
-    // Material 3 Navigation Bar: 5 evenly distributed tabs matching hitboxes exactly
     let tab_cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -1157,16 +1237,29 @@ fn draw_tabs_bar(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         let is_active = t == state.current_tab;
         let cell_rect = tab_cols[i];
 
-        // Register exact hitbox matching the layout column
         state.clickables.push(ClickableArea {
             rect: cell_rect,
             action: AppAction::SelectTab(i),
         });
 
-        let label = if is_active {
-            format!("● {}", t.name())
+        let label = if inner.width < 45 {
+            if is_active {
+                format!("[{}]", t.tiny_name())
+            } else {
+                format!(" {} ", t.tiny_name())
+            }
+        } else if inner.width < 75 {
+            if is_active {
+                format!("●{}", t.short_name())
+            } else {
+                format!(" {}", t.short_name())
+            }
         } else {
-            format!("  {}", t.name())
+            if is_active {
+                format!("● {}", t.name())
+            } else {
+                format!("  {}", t.name())
+            }
         };
 
         let style = if is_active {
@@ -1186,16 +1279,36 @@ fn draw_tabs_bar(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn draw_tab_targets(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(45), // Left: Targets list
-            Constraint::Percentage(55), // Right: Telemetry card & Actions
-        ])
-        .split(area);
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
 
-    draw_targets_list(f, cols[0], state);
-    draw_target_telemetry_card(f, cols[1], state);
+    if area.width < 80 {
+        // Vertical layout for narrow terminals / mobile / Termux
+        let list_h = if area.height < 18 { 6 } else { 7 };
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(list_h),
+                Constraint::Min(6),
+            ])
+            .split(area);
+
+        draw_targets_list(f, chunks[0], state);
+        draw_target_telemetry_card(f, chunks[1], state);
+    } else {
+        // Horizontal layout for desktop / wide terminals
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(45),
+                Constraint::Percentage(55),
+            ])
+            .split(area);
+
+        draw_targets_list(f, cols[0], state);
+        draw_target_telemetry_card(f, cols[1], state);
+    }
 }
 
 fn draw_targets_list(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
@@ -1213,14 +1326,28 @@ fn draw_targets_list(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(state.targets.len() as u16),
-            Constraint::Length(2),
-            Constraint::Min(0),
-        ])
-        .split(inner);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let show_summary = inner.height > state.targets.len() as u16;
+    let chunks = if show_summary {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(state.targets.len() as u16),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .split(inner)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(state.targets.len() as u16),
+            ])
+            .split(inner)
+    };
 
     let items: Vec<ListItem> = state
         .targets
@@ -1229,11 +1356,23 @@ fn draw_targets_list(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         .map(|(i, t)| {
             let is_sel = i == state.selected_idx;
             let (badge, badge_style) = if !t.exists {
-                ("— Не найден", style_missing())
+                if inner.width < 45 {
+                    ("—", style_missing())
+                } else {
+                    ("— Не найден", style_missing())
+                }
             } else if t.is_patched {
-                ("● Пропатчен", style_patched())
+                if inner.width < 45 {
+                    ("● Да", style_patched())
+                } else {
+                    ("● Пропатчен", style_patched())
+                }
             } else {
-                ("○ Не пропатчен", style_unpatched())
+                if inner.width < 45 {
+                    ("○ Нет", style_unpatched())
+                } else {
+                    ("○ Не пропатчен", style_unpatched())
+                }
             };
 
             let prefix = if is_sel { "› " } else { "  " };
@@ -1243,9 +1382,16 @@ fn draw_targets_list(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
                 Style::default().fg(MD_TEXT_MED)
             };
 
+            let max_name_len = if inner.width < 45 {
+                (inner.width.saturating_sub(8) as usize).max(6)
+            } else {
+                (inner.width.saturating_sub(18) as usize).min(26).max(8)
+            };
+            let short_name = truncate_middle(&t.name, max_name_len);
+
             let spans = vec![
                 Span::styled(prefix, Style::default().fg(MD_PRIMARY)),
-                Span::styled(format!("{:<25} ", t.name), name_style),
+                Span::styled(format!("{:<max_name_len$} ", short_name), name_style),
                 Span::styled(badge, badge_style),
             ];
 
@@ -1274,37 +1420,45 @@ fn draw_targets_list(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         }
     }
 
-    // Bottom summary with visual mini progress bar
-    let installed = state.targets.iter().filter(|t| t.exists).count();
-    let patched = state
-        .targets
-        .iter()
-        .filter(|t| t.exists && t.is_patched)
-        .count();
+    if show_summary && chunks.len() > 1 {
+        let installed = state.targets.iter().filter(|t| t.exists).count();
+        let patched = state
+            .targets
+            .iter()
+            .filter(|t| t.exists && t.is_patched)
+            .count();
 
-    let ratio = if !state.targets.is_empty() {
-        patched as f64 / state.targets.len() as f64
-    } else {
-        0.0
-    };
+        let mut sum_spans = Vec::new();
+        if inner.width < 50 {
+            sum_spans.push(Span::styled(
+                format!("Уст:{}/{} Патч:{}/{}", installed, state.targets.len(), patched, state.targets.len()),
+                Style::default().fg(MD_TEXT_MED),
+            ));
+        } else {
+            let ratio = if !state.targets.is_empty() {
+                patched as f64 / state.targets.len() as f64
+            } else {
+                0.0
+            };
+            sum_spans.push(Span::styled("Установлено: ", Style::default().fg(MD_TEXT_LOW)));
+            sum_spans.push(Span::styled(
+                format!("{}/{}  ", installed, state.targets.len()),
+                Style::default().fg(MD_PRIMARY),
+            ));
+            sum_spans.push(Span::styled("Пропатчено: ", Style::default().fg(MD_TEXT_LOW)));
+            sum_spans.push(Span::styled(format!("{}/{}  ", patched, state.targets.len()), style_patched()));
+            if inner.width >= 65 {
+                sum_spans.push(Span::raw("["));
+                sum_spans.extend(render_mini_bar(ratio, 8));
+                sum_spans.push(Span::raw("]"));
+            }
+        }
 
-    let mut sum_spans = vec![
-        Span::styled("Установлено: ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(
-            format!("{}/{}  ", installed, state.targets.len()),
-            Style::default().fg(MD_PRIMARY),
-        ),
-        Span::styled("Пропатчено: ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(format!("{}/{}  ", patched, state.targets.len()), style_patched()),
-        Span::raw("["),
-    ];
-    sum_spans.extend(render_mini_bar(ratio, 10));
-    sum_spans.push(Span::raw("]"));
-
-    let sum_block = Block::default()
-        .borders(Borders::TOP)
-        .border_style(style_border_normal());
-    f.render_widget(Paragraph::new(Line::from(sum_spans)).block(sum_block), chunks[1]);
+        let sum_block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(style_border_normal());
+        f.render_widget(Paragraph::new(Line::from(sum_spans)).block(sum_block), chunks[1]);
+    }
 }
 
 fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
@@ -1317,17 +1471,16 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    if state.selected_idx >= state.targets.len() {
+    if state.selected_idx >= state.targets.len() || inner.width == 0 || inner.height == 0 {
         return;
     }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8), // Details lines
+            Constraint::Min(4),    // Details lines
             Constraint::Length(3), // Action buttons
-            Constraint::Length(2), // Notification line
-            Constraint::Min(0),    // Remaining space stays at bottom in fullscreen
+            Constraint::Length(1), // Notification line
         ])
         .split(inner);
 
@@ -1336,11 +1489,11 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
 
     // Name & status
     let status_badge = if !item.exists {
-        Span::styled("— Не установлен", style_missing())
+        Span::styled(if inner.width < 50 { "— Не найден" } else { "— Не установлен" }, style_missing())
     } else if item.is_patched {
-        Span::styled("● Пропатчен (региональный лок снят)", style_patched())
+        Span::styled(if inner.width < 50 { "● Пропатчен" } else { "● Пропатчен (региональный лок снят)" }, style_patched())
     } else {
-        Span::styled("○ Не пропатчен (активны ограничения)", style_unpatched())
+        Span::styled(if inner.width < 50 { "○ Не пропатчен" } else { "○ Не пропатчен (активны ограничения)" }, style_unpatched())
     };
 
     lines.push(Line::from(vec![
@@ -1359,7 +1512,7 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| "Файл не найден на диске".into());
-    let short_path = truncate_middle(&raw_path, 48);
+    let short_path = truncate_middle(&raw_path, (inner.width.saturating_sub(15) as usize).max(10));
 
     lines.push(Line::from(vec![
         Span::styled("Путь:         ", Style::default().fg(MD_TEXT_LOW)),
@@ -1375,16 +1528,27 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
     let arch_str = item.arch.map(|a| a.as_str()).unwrap_or("—");
     let ver_str = item.version.as_deref().unwrap_or("—");
 
-    lines.push(Line::from(vec![
-        Span::styled("Размер:       ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(sz_str, Style::default().fg(MD_TEXT_HIGH)),
-        Span::raw("    "),
-        Span::styled("Архитектура: ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(arch_str, Style::default().fg(MD_PRIMARY)),
-        Span::raw("    "),
-        Span::styled("Версия: ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(ver_str, Style::default().fg(MD_SUCCESS)),
-    ]));
+    if inner.width < 55 {
+        lines.push(Line::from(vec![
+            Span::styled("Размер: ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(sz_str, Style::default().fg(MD_TEXT_HIGH)),
+            Span::styled(" • Архит: ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(arch_str, Style::default().fg(MD_PRIMARY)),
+            Span::styled(" • Верс: ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(ver_str, Style::default().fg(MD_SUCCESS)),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("Размер:       ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(sz_str, Style::default().fg(MD_TEXT_HIGH)),
+            Span::raw("    "),
+            Span::styled("Архитектура: ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(arch_str, Style::default().fg(MD_PRIMARY)),
+            Span::raw("    "),
+            Span::styled("Версия: ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(ver_str, Style::default().fg(MD_SUCCESS)),
+        ]));
+    }
 
     // SHA-256 Checksum
     let sha_display = if let Some(ref h) = item.sha256 {
@@ -1399,23 +1563,30 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
 
     // Backup info
     let bak_span = if item.backup_found {
-        Span::styled(
-            format!("Сохранена (.agybak, {})", format_bytes_ru(item.backup_size)),
-            style_patched(),
-        )
+        if inner.width < 50 {
+            Span::styled(format!("Есть ({})", format_bytes_ru(item.backup_size)), style_patched())
+        } else {
+            Span::styled(format!("Сохранена (.agybak, {})", format_bytes_ru(item.backup_size)), style_patched())
+        }
     } else {
-        Span::styled("Отсутствует (создастся автоматически)", style_unpatched())
+        if inner.width < 50 {
+            Span::styled("Нет", style_unpatched())
+        } else {
+            Span::styled("Отсутствует (создастся автоматически)", style_unpatched())
+        }
     };
     lines.push(Line::from(vec![
         Span::styled("Бэкап:        ", Style::default().fg(MD_TEXT_LOW)),
         bak_span,
     ]));
 
-    // Description
-    lines.push(Line::from(vec![
-        Span::styled("Операция:     ", Style::default().fg(MD_TEXT_LOW)),
-        Span::styled(item.desc, Style::default().fg(MD_TEXT_MED)),
-    ]));
+    // Description only if height allows
+    if inner.height >= 12 {
+        lines.push(Line::from(vec![
+            Span::styled("Операция:     ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(item.desc, Style::default().fg(MD_TEXT_MED)),
+        ]));
+    }
 
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), chunks[0]);
 
@@ -1434,30 +1605,17 @@ fn draw_target_telemetry_card(f: &mut ratatui::Frame, area: Rect, state: &mut Ap
         ])
         .split(chunks[1]);
 
-    render_button(
-        f,
-        btn_row[0],
-        "Патчить (Enter)",
-        focused_btn == Some(0),
-        AppAction::PatchSelected,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[1],
-        "Откатить (R)",
-        focused_btn == Some(1),
-        AppAction::RestoreSelected,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[2],
-        "Патчить всё (A)",
-        focused_btn == Some(2),
-        AppAction::PatchAll,
-        state,
-    );
+    let (b_patch, b_restore, b_all) = if inner.width < 50 {
+        ("Патч (↵)", "Откат (R)", "Всё (A)")
+    } else if inner.width < 70 {
+        ("Патч (Enter)", "Откат (R)", "Все (A)")
+    } else {
+        ("Патчить (Enter)", "Откатить (R)", "Патчить всё (A)")
+    };
+
+    render_button(f, btn_row[0], b_patch, focused_btn == Some(0), AppAction::PatchSelected, state);
+    render_button(f, btn_row[1], b_restore, focused_btn == Some(1), AppAction::RestoreSelected, state);
+    render_button(f, btn_row[2], b_all, focused_btn == Some(2), AppAction::PatchAll, state);
 
     // Notification line
     let (ref msg_text, is_success) = state.last_message;
@@ -1487,21 +1645,32 @@ fn draw_tab_paths(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(10),
+            Constraint::Min(8),
             Constraint::Length(3),
-            Constraint::Min(0),
         ])
         .split(inner);
 
-    let slot_names = [
+    let slot_names_full = [
         "1. Antigravity IDE (файл main.js)",
         "2. Antigravity 2.0 (файл language_server)",
         "3. Antigravity CLI (утилита agy)",
         "4. Расширение для VS Code (extension.js)",
         "5. Бинарник VS Code (~/.gemini/bin/antigravity)",
+    ];
+
+    let slot_names_short = [
+        "1. IDE (main.js)",
+        "2. Lang Server",
+        "3. CLI (agy)",
+        "4. VS Code Ext",
+        "5. VS Code Bin",
     ];
 
     let mut items = Vec::new();
@@ -1518,21 +1687,41 @@ fn draw_tab_paths(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         let prefix = if is_sel { "› " } else { "  " };
 
         let badge = if is_custom {
-            Span::styled(" [Свой путь] ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD))
+            if inner.width < 50 {
+                Span::styled("[Свой]", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD))
+            } else {
+                Span::styled(" [Свой путь] ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD))
+            }
         } else {
-            Span::styled(" [Авто] ", Style::default().fg(MD_TEXT_LOW))
+            if inner.width < 50 {
+                Span::styled("[Авто]", Style::default().fg(MD_TEXT_LOW))
+            } else {
+                Span::styled(" [Авто] ", Style::default().fg(MD_TEXT_LOW))
+            }
         };
 
         let status_span = if exists {
-            Span::styled(" ● Найден ", style_patched())
+            Span::styled(if inner.width < 50 { " ●" } else { " ● Найден " }, style_patched())
         } else {
-            Span::styled(" ○ Отсутствует ", style_unpatched())
+            Span::styled(if inner.width < 50 { " ○" } else { " ○ Отсутствует " }, style_unpatched())
+        };
+
+        let slot_str = if inner.width < 60 {
+            slot_names_short[i]
+        } else {
+            slot_names_full[i]
+        };
+
+        let max_slot_w = if inner.width < 50 {
+            (inner.width.saturating_sub(14) as usize).max(8)
+        } else {
+            44
         };
 
         let line = Line::from(vec![
             Span::styled(prefix, Style::default().fg(MD_PRIMARY)),
             Span::styled(
-                format!("{:<44} ", slot_names[i]),
+                format!("{:<max_slot_w$} ", truncate_middle(slot_str, max_slot_w)),
                 if is_sel {
                     Style::default().fg(MD_TEXT_HIGH).add_modifier(Modifier::BOLD)
                 } else {
@@ -1543,9 +1732,10 @@ fn draw_tab_paths(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             status_span,
         ]);
 
+        let path_w = (inner.width.saturating_sub(8) as usize).max(10);
         let path_line = Line::from(vec![
             Span::raw("     ↳ "),
-            Span::styled(truncate_middle(&path_display, 65), Style::default().fg(MD_SECONDARY)),
+            Span::styled(truncate_middle(&path_display, path_w), Style::default().fg(MD_SECONDARY)),
         ]);
 
         if is_sel {
@@ -1585,30 +1775,17 @@ fn draw_tab_paths(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         ])
         .split(chunks[1]);
 
-    render_button(
-        f,
-        btn_row[0],
-        "Изменить путь (Enter)",
-        focused_btn == Some(0),
-        AppAction::EditPath(state.selected_path_slot),
-        state,
-    );
-    render_button(
-        f,
-        btn_row[1],
-        "Сбросить (D)",
-        focused_btn == Some(1),
-        AppAction::ResetPath(state.selected_path_slot),
-        state,
-    );
-    render_button(
-        f,
-        btn_row[2],
-        "Автопоиск всех (R)",
-        focused_btn == Some(2),
-        AppAction::AutoDetectPaths,
-        state,
-    );
+    let (b_edit, b_reset, b_auto) = if inner.width < 50 {
+        ("Путь (↵)", "Сброс (D)", "Авто (R)")
+    } else if inner.width < 70 {
+        ("Изменить (↵)", "Сбросить (D)", "Авто (R)")
+    } else {
+        ("Изменить путь (Enter)", "Сбросить (D)", "Автопоиск всех (R)")
+    };
+
+    render_button(f, btn_row[0], b_edit, focused_btn == Some(0), AppAction::EditPath(state.selected_path_slot), state);
+    render_button(f, btn_row[1], b_reset, focused_btn == Some(1), AppAction::ResetPath(state.selected_path_slot), state);
+    render_button(f, btn_row[2], b_auto, focused_btn == Some(2), AppAction::AutoDetectPaths, state);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1629,10 +1806,14 @@ fn draw_tab_logs(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(6),
+            Constraint::Min(4),
             Constraint::Length(3),
         ])
         .split(inner);
@@ -1645,16 +1826,23 @@ fn draw_tab_logs(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             .iter()
             .map(|l| {
                 let (badge, style) = match l.level {
-                    LogLevel::Info => ("[ ИНФО  ]", Style::default().fg(MD_PRIMARY)),
-                    LogLevel::Success => ("[ УСПЕХ ]", style_patched()),
-                    LogLevel::Warn => ("[ ВНИМ  ]", style_unpatched()),
-                    LogLevel::Error => ("[ ОШИБК ]", Style::default().fg(MD_ERROR)),
+                    LogLevel::Info => if inner.width < 50 { ("[i]", Style::default().fg(MD_PRIMARY)) } else { ("[ ИНФО  ]", Style::default().fg(MD_PRIMARY)) },
+                    LogLevel::Success => if inner.width < 50 { ("[✓]", style_patched()) } else { ("[ УСПЕХ ]", style_patched()) },
+                    LogLevel::Warn => if inner.width < 50 { ("[?]", style_unpatched()) } else { ("[ ВНИМ  ]", style_unpatched()) },
+                    LogLevel::Error => if inner.width < 50 { ("[x]", Style::default().fg(MD_ERROR)) } else { ("[ ОШИБК ]", Style::default().fg(MD_ERROR)) },
                 };
-                let line = Line::from(vec![
-                    Span::styled(format!("[{}] ", l.time), Style::default().fg(MD_TEXT_LOW)),
-                    Span::styled(format!("{} ", badge), style),
-                    Span::styled(&l.message, Style::default().fg(MD_TEXT_HIGH)),
-                ]);
+                let line = if inner.width < 45 {
+                    Line::from(vec![
+                        Span::styled(format!("{} ", badge), style),
+                        Span::styled(&l.message, Style::default().fg(MD_TEXT_HIGH)),
+                    ])
+                } else {
+                    Line::from(vec![
+                        Span::styled(format!("[{}] ", l.time), Style::default().fg(MD_TEXT_LOW)),
+                        Span::styled(format!("{} ", badge), style),
+                        Span::styled(&l.message, Style::default().fg(MD_TEXT_HIGH)),
+                    ])
+                };
                 ListItem::new(line)
             })
             .collect()
@@ -1676,22 +1864,14 @@ fn draw_tab_logs(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         ])
         .split(chunks[1]);
 
-    render_button(
-        f,
-        btn_row[0],
-        "Очистить журнал (C)",
-        focused_btn == Some(0),
-        AppAction::ClearLogs,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[1],
-        "Обновить статус (R)",
-        focused_btn == Some(1),
-        AppAction::Refresh,
-        state,
-    );
+    let (b_clear, b_refresh) = if inner.width < 50 {
+        ("Очистить (C)", "Обновить (R)")
+    } else {
+        ("Очистить журнал (C)", "Обновить статус (R)")
+    };
+
+    render_button(f, btn_row[0], b_clear, focused_btn == Some(0), AppAction::ClearLogs, state);
+    render_button(f, btn_row[1], b_refresh, focused_btn == Some(1), AppAction::Refresh, state);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1708,12 +1888,15 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(8),
+            Constraint::Min(6),
             Constraint::Length(3),
-            Constraint::Min(0),
         ])
         .split(inner);
 
@@ -1728,7 +1911,7 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         ]),
         Line::from(vec![
             Span::styled("Репозиторий проекта:  ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(GITHUB_REPO, Style::default().fg(MD_SECONDARY)),
+            Span::styled(truncate_middle(GITHUB_REPO, (inner.width.saturating_sub(24) as usize).max(10)), Style::default().fg(MD_SECONDARY)),
         ]),
         Line::raw(""),
     ];
@@ -1737,27 +1920,29 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         UpdateStatus::Checking => {
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("{} Запрос информации о релизах на GitHub API...", get_spinner_char(state.tick)),
+                    format!("{} Запрос релизов на GitHub API...", get_spinner_char(state.tick)),
                     Style::default().fg(MD_WARNING),
                 ),
             ]));
         }
         UpdateStatus::UpToDate => {
             lines.push(Line::from(vec![
-                Span::styled("● У вас установлена самая актуальная версия.", style_patched()),
+                Span::styled("● У вас самая актуальная версия.", style_patched()),
             ]));
-            lines.push(Line::from(vec![
-                Span::styled("Бинарные патчи и смещения соответствуют последнему официальному релизу.", Style::default().fg(MD_TEXT_MED)),
-            ]));
+            if inner.height >= 10 {
+                lines.push(Line::from(vec![
+                    Span::styled("Бинарные патчи соответствуют последнему официальному релизу.", Style::default().fg(MD_TEXT_MED)),
+                ]));
+            }
         }
         UpdateStatus::Available(tag, url) => {
             lines.push(Line::from(vec![
-                Span::styled("● Доступна новая версия: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled("● Новая версия: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::styled(tag, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("Ссылка: ", Style::default().fg(MD_TEXT_LOW)),
-                Span::styled(url, Style::default().fg(MD_SECONDARY)),
+                Span::styled(truncate_middle(&url, (inner.width.saturating_sub(10) as usize).max(10)), Style::default().fg(MD_SECONDARY)),
             ]));
         }
         UpdateStatus::Error(e) => {
@@ -1784,22 +1969,14 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         ])
         .split(chunks[1]);
 
-    render_button(
-        f,
-        btn_row[0],
-        "Открыть страницу релизов (Enter)",
-        focused_btn == Some(0),
-        AppAction::OpenRelease,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[1],
-        "Проверить снова (R)",
-        focused_btn == Some(1),
-        AppAction::CheckUpdates,
-        state,
-    );
+    let (b_releases, b_check) = if inner.width < 55 {
+        ("Релизы (↵)", "Проверить (R)")
+    } else {
+        ("Открыть страницу релизов (Enter)", "Проверить снова (R)")
+    };
+
+    render_button(f, btn_row[0], b_releases, focused_btn == Some(0), AppAction::OpenRelease, state);
+    render_button(f, btn_row[1], b_check, focused_btn == Some(1), AppAction::CheckUpdates, state);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1816,150 +1993,191 @@ fn draw_tab_about(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let cols = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(55),
-            Constraint::Percentage(45),
-        ])
-        .split(inner);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
 
-    // Left: Description & Credits & Buttons
-    let left_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(10),
-            Constraint::Length(3),
-            Constraint::Min(0),
-        ])
-        .split(cols[0]);
+    if inner.width < 80 {
+        // Narrow / mobile layout: single column
+        let v_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ])
+            .split(inner);
 
-    let about_lines = vec![
-        Line::from(vec![
-            Span::styled("Open AG Patcher (Rust Edition) ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled(format!("v{}", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
-        ]),
-        Line::from("Сверхбыстрая нативная утилита обхода региональных ограничений."),
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled("• Автор патчера:       ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(AUTHOR_NAME, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("• Репозиторий:         ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(PROJECT_REPO_URL, Style::default().fg(MD_SECONDARY)),
-        ]),
-        Line::from(vec![
-            Span::styled("• Автор оригинала:     ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(format!("{} (первоисточник идеи и Python-патчера)", UPSTREAM_AUTHOR), Style::default().fg(MD_SUCCESS)),
-        ]),
-        Line::from(vec![
-            Span::styled("• GitLab оригинала:    ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(UPSTREAM_GITLAB, Style::default().fg(MD_SECONDARY)),
-        ]),
-        Line::from(vec![
-            Span::styled("• SourceForge:         ", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(UPSTREAM_SOURCEFORGE, Style::default().fg(MD_SECONDARY)),
-        ]),
-        Line::raw(""),
-        Line::from(vec![
-            Span::styled("Безопасность: ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Все патчи обратимы, оригинальные бэкапы .agybak сохраняются.", Style::default().fg(MD_TEXT_MED)),
-        ]),
-    ];
+        let about_lines = vec![
+            Line::from(vec![
+                Span::styled("Open AG Patcher (Rust Edition) ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("v{}", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
+            ]),
+            Line::from("Сверхбыстрая нативная утилита обхода региональных ограничений."),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("• Автор:        ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(AUTHOR_NAME, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::raw(" (Milordick)"),
+            ]),
+            Line::from(vec![
+                Span::styled("• Upstream:     ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(UPSTREAM_AUTHOR, Style::default().fg(MD_SUCCESS)),
+                Span::raw(" (GitLab / SF)"),
+            ]),
+            Line::from(vec![
+                Span::styled("• Управление:   ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled("Табы: 1-5  •  Патч: ↵  •  Откат: R  •  Всё: A", Style::default().fg(MD_TEXT_MED)),
+            ]),
+        ];
 
-    f.render_widget(Paragraph::new(about_lines).wrap(Wrap { trim: true }), left_chunks[0]);
+        f.render_widget(Paragraph::new(about_lines).wrap(Wrap { trim: true }), v_chunks[0]);
 
-    // Action buttons for About
-    let focused_btn = match state.focus {
-        PaneFocus::Buttons(idx) => Some(idx),
-        _ => None,
-    };
+        let focused_btn = match state.focus {
+            PaneFocus::Buttons(idx) => Some(idx),
+            _ => None,
+        };
 
-    let btn_row = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
-        .split(left_chunks[1]);
+        let btn_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ])
+            .split(v_chunks[1]);
 
-    render_button(
-        f,
-        btn_row[0],
-        "GitHub проекта (O)",
-        focused_btn == Some(0),
-        AppAction::OpenProjectRepo,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[1],
-        "GitLab оригинала (G)",
-        focused_btn == Some(1),
-        AppAction::OpenGitLabRepo,
-        state,
-    );
-    render_button(
-        f,
-        btn_row[2],
-        "SourceForge (S)",
-        focused_btn == Some(2),
-        AppAction::OpenSourceForgeRepo,
-        state,
-    );
+        let (b0, b1, b2) = if inner.width < 50 {
+            ("GitHub (O)", "GitLab (G)", "SF (S)")
+        } else {
+            ("GitHub (O)", "GitLab (G)", "SourceForge (S)")
+        };
 
-    // Right: Shortcuts Cheatsheet
-    let sheet_block = Block::default()
-        .title(Span::styled(" Горячие клавиши ", Style::default().fg(MD_PRIMARY)))
-        .borders(Borders::LEFT)
-        .border_style(style_border_normal());
+        render_button(f, btn_row[0], b0, focused_btn == Some(0), AppAction::OpenProjectRepo, state);
+        render_button(f, btn_row[1], b1, focused_btn == Some(1), AppAction::OpenGitLabRepo, state);
+        render_button(f, btn_row[2], b2, focused_btn == Some(2), AppAction::OpenSourceForgeRepo, state);
+    } else {
+        // Desktop / wide layout: side-by-side
+        let cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(55),
+                Constraint::Percentage(45),
+            ])
+            .split(inner);
 
-    let sheet_lines = vec![
-        Line::from(vec![
-            Span::styled("  1 - 5       ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Переключение вкладок", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tab / ⇄     ", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Фокус: список ⇄ кнопки", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter / P   ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("Пропатчить выбранный", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  R           ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled("Восстановить / Обновить", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  A           ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Пропатчить всё за 1 клик", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  S           ", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Пути файлов / SourceForge", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  L           ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::styled("Журнал событий", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  U           ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled("Проверить обновления", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Мышь        ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::styled("Клик по вкладкам и кнопкам", Style::default().fg(MD_TEXT_MED)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Q / Esc     ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
-            Span::styled("Выход из программы", Style::default().fg(MD_TEXT_MED)),
-        ]),
-    ];
+        let left_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(10),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(cols[0]);
 
-    f.render_widget(Paragraph::new(sheet_lines).block(sheet_block), cols[1]);
+        let about_lines = vec![
+            Line::from(vec![
+                Span::styled("Open AG Patcher (Rust Edition) ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("v{}", CURRENT_VERSION), Style::default().fg(MD_SECONDARY)),
+            ]),
+            Line::from("Сверхбыстрая нативная утилита обхода региональных ограничений."),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("• Автор патчера:       ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(AUTHOR_NAME, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from(vec![
+                Span::styled("• Репозиторий:         ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(PROJECT_REPO_URL, Style::default().fg(MD_SECONDARY)),
+            ]),
+            Line::from(vec![
+                Span::styled("• Автор оригинала:     ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(format!("{} (первоисточник идеи и Python-патчера)", UPSTREAM_AUTHOR), Style::default().fg(MD_SUCCESS)),
+            ]),
+            Line::from(vec![
+                Span::styled("• GitLab оригинала:    ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(UPSTREAM_GITLAB, Style::default().fg(MD_SECONDARY)),
+            ]),
+            Line::from(vec![
+                Span::styled("• SourceForge:         ", Style::default().fg(MD_TEXT_LOW)),
+                Span::styled(UPSTREAM_SOURCEFORGE, Style::default().fg(MD_SECONDARY)),
+            ]),
+            Line::raw(""),
+            Line::from(vec![
+                Span::styled("Безопасность: ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Все патчи обратимы, оригинальные бэкапы .agybak сохраняются.", Style::default().fg(MD_TEXT_MED)),
+            ]),
+        ];
+
+        f.render_widget(Paragraph::new(about_lines).wrap(Wrap { trim: true }), left_chunks[0]);
+
+        let focused_btn = match state.focus {
+            PaneFocus::Buttons(idx) => Some(idx),
+            _ => None,
+        };
+
+        let btn_row = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(33),
+                Constraint::Percentage(33),
+                Constraint::Percentage(34),
+            ])
+            .split(left_chunks[1]);
+
+        render_button(f, btn_row[0], "GitHub проекта (O)", focused_btn == Some(0), AppAction::OpenProjectRepo, state);
+        render_button(f, btn_row[1], "GitLab оригинала (G)", focused_btn == Some(1), AppAction::OpenGitLabRepo, state);
+        render_button(f, btn_row[2], "SourceForge (S)", focused_btn == Some(2), AppAction::OpenSourceForgeRepo, state);
+
+        let sheet_block = Block::default()
+            .title(Span::styled(" Горячие клавиши ", Style::default().fg(MD_PRIMARY)))
+            .borders(Borders::LEFT)
+            .border_style(style_border_normal());
+
+        let sheet_lines = vec![
+            Line::from(vec![
+                Span::styled("  1 - 5       ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Переключение вкладок", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Tab / ⇄     ", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Фокус: список ⇄ кнопки", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Enter / P   ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled("Пропатчить выбранный", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  R           ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("Восстановить / Обновить", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  A           ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Пропатчить всё за 1 клик", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  S           ", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Пути файлов / SourceForge", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  L           ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+                Span::styled("Журнал событий", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  U           ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled("Проверить обновления", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Мышь        ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled("Клик по вкладкам и кнопкам", Style::default().fg(MD_TEXT_MED)),
+            ]),
+            Line::from(vec![
+                Span::styled("  Q / Esc     ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled("Выход из программы", Style::default().fg(MD_TEXT_MED)),
+            ]),
+        ];
+
+        f.render_widget(Paragraph::new(sheet_lines).block(sheet_block), cols[1]);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1967,30 +2185,69 @@ fn draw_tab_about(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn draw_footer(f: &mut ratatui::Frame, area: Rect) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BORDER_ROUNDED)
-        .border_style(style_border_normal());
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
 
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let is_compact = area.height < 3;
+    let inner = if is_compact {
+        area
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BORDER_ROUNDED)
+            .border_style(style_border_normal());
+        let in_rect = block.inner(area);
+        f.render_widget(block, area);
+        in_rect
+    };
 
-    let line = Line::from(vec![
-        Span::styled("Tab ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Фокус  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("Enter ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Выбор  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("1-5 ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Вкладки  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("P ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
-        Span::styled("Патч  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("R ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
-        Span::styled("Откат  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("A ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled("Всё  •  ", Style::default().fg(MD_TEXT_MED)),
-        Span::styled("Q ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
-        Span::styled("Выход", Style::default().fg(MD_TEXT_MED)),
-    ]);
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let line = if inner.width < 45 {
+        Line::from(vec![
+            Span::styled("↵", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(":Патч ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("R", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(":Откат ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("A", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(":Всё ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("Q", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled(":Выход", Style::default().fg(MD_TEXT_MED)),
+        ])
+    } else if inner.width < 75 {
+        Line::from(vec![
+            Span::styled("1-5", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(":Табы • ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("↵", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(":Патч • ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("R", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(":Откат • ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("A", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(":Всё • ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("Q", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled(":Выход", Style::default().fg(MD_TEXT_MED)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("Tab ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("Фокус  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("Enter ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("Выбор  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("1-5 ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("Вкладки  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("P ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled("Патч  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("R ", Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled("Откат  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("A ", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("Всё  •  ", Style::default().fg(MD_TEXT_MED)),
+            Span::styled("Q ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled("Выход", Style::default().fg(MD_TEXT_MED)),
+        ])
+    };
 
     f.render_widget(Paragraph::new(line).alignment(Alignment::Center), inner);
 }
@@ -2007,6 +2264,10 @@ fn render_button(
     action: AppAction,
     state: &mut AppState,
 ) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
     state.clickables.push(ClickableArea {
         rect: area,
         action,
@@ -2024,10 +2285,12 @@ fn render_button(
         style_button_normal()
     };
 
-    let display_label = if is_focused {
-        format!("› {} ‹", label)
+    let display_label = if area.width < 12 {
+        label.trim().to_string()
+    } else if is_focused {
+        format!("›{}‹", label.trim())
     } else {
-        format!("  {}  ", label)
+        format!(" {} ", label.trim())
     };
 
     let block = Block::default()
@@ -2068,15 +2331,22 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 }
 
 fn draw_modal_path_input(f: &mut ratatui::Frame, area: Rect, idx: usize, state: &AppState) {
-    let popup_area = centered_rect(66, 28, area);
+    let (percent_x, percent_y) = if area.width < 60 {
+        (96, 60)
+    } else if area.width < 90 {
+        (85, 45)
+    } else {
+        (66, 28)
+    };
+    let popup_area = centered_rect(percent_x, percent_y, area);
     f.render_widget(Clear, popup_area);
 
     let titles = [
-        "Введите путь к Antigravity IDE (main.js)",
-        "Введите путь к Antigravity 2.0 (language_server)",
-        "Введите путь к Antigravity CLI (agy)",
-        "Введите путь к расширению VS Code (extension.js)",
-        "Введите путь к бинарнику VS Code (antigravity)",
+        "Путь к Antigravity IDE (main.js)",
+        "Путь к Antigravity 2.0 (language_server)",
+        "Путь к Antigravity CLI (agy)",
+        "Путь к расширению VS Code (extension.js)",
+        "Путь к бинарнику VS Code (antigravity)",
     ];
 
     let block = Block::default()
@@ -2151,8 +2421,11 @@ fn current_time_str() -> String {
 }
 
 fn truncate_middle(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len || max_len < 6 {
+    let char_count = s.chars().count();
+    if char_count <= max_len {
         s.to_string()
+    } else if max_len <= 3 {
+        s.chars().take(max_len).collect()
     } else {
         let chars: Vec<char> = s.chars().collect();
         let left = (max_len - 3) / 2;
