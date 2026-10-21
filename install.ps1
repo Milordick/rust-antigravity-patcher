@@ -57,7 +57,13 @@ Write-Host ""
 
 # --- Step 1: Detect Architecture ---
 $is64Bit = [Environment]::Is64BitOperatingSystem
-$arch = if ($is64Bit) { "x86_64" } else { "x86" }
+$rawArch = $env:PROCESSOR_ARCHITECTURE
+$arch = "x86_64"
+if ($rawArch -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
+    $arch = "arm64"
+} elseif (-not $is64Bit) {
+    $arch = "x86"
+}
 Write-Host "  $ColorGreen✓$ColorReset  Система определена: $ColorBold Windows$ColorReset ($arch)"
 
 # --- Step 2: Target Directory Setup ---
@@ -120,12 +126,13 @@ Write-StepAnimated "Установка исполняемого файла в $i
     }
 
     # 3. Fallback: Download prebuilt binary from GitHub Releases
-    $downloadUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
+    $downloadUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-$arch.exe"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $targetExe -UseBasicParsing
     } catch {
-        $fallbackUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/open-ag-patcher-windows-x86_64.exe"
+        # Fallback to x86_64 (Windows on ARM runs x64 via built-in Prism emulator)
+        $fallbackUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
         Invoke-WebRequest -Uri $fallbackUrl -OutFile $targetExe -UseBasicParsing
     }
 }

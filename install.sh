@@ -77,7 +77,7 @@ echo -e "${COLOR_BLUE}│${COLOR_RESET}   ${COLOR_DIM}Универсальный
 echo -e "${COLOR_BLUE}└────────────────────────────────────────────────────────────┘${COLOR_RESET}"
 echo ""
 
-# --- Step 1: Detect Platform and Architecture ---
+# --- Step 1: Detect Platform, Architecture and Atomic/Immutable OS ---
 OS_TYPE="$(uname -s)"
 ARCH_TYPE="$(uname -m)"
 
@@ -98,11 +98,42 @@ if [ "$PLATFORM" = "unknown" ] || [ "$ARCH" = "unknown" ]; then
     exit 1
 fi
 
-echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH})"
+# Detect atomic / immutable Linux (Bazzite, Fedora Silverblue, SteamOS, openSUSE MicroOS, NixOS)
+IS_ATOMIC=0
+ATOMIC_NAME=""
+if [ "$PLATFORM" = "linux" ]; then
+    if [ -f /run/ostree-booted ] || [ -d /sysroot/ostree ]; then
+        IS_ATOMIC=1
+        ATOMIC_NAME="ostree"
+    fi
+    if [ -f /etc/os-release ]; then
+        if grep -q -E -i "(bazzite|silverblue|kinoite|steamos|microos|nixos|vanilla)" /etc/os-release 2>/dev/null; then
+            IS_ATOMIC=1
+            ATOMIC_NAME="$(grep -E -i "^NAME=" /etc/os-release | head -n1 | cut -d= -f2 | tr -d '"')"
+        fi
+    fi
+fi
+
+if [ "$IS_ATOMIC" -eq 1 ] && [ -n "$ATOMIC_NAME" ]; then
+    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH}) [Атомарный дистрибутив: ${ATOMIC_NAME}]"
+else
+    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH})"
+fi
 
 # --- Step 2: Determine Target Paths ---
+# On atomic / immutable systems, rootfs (/usr) is read-only.
+# We always install safely to ~/.local/bin without modifying ostree layers.
 if [ "$(id -u)" -eq 0 ]; then
-    BIN_DIR="/usr/local/bin"
+    if [ "$IS_ATOMIC" -eq 1 ] || [ ! -w /usr/local ]; then
+        if [ -n "$SUDO_USER" ]; then
+            TARGET_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+            BIN_DIR="${TARGET_HOME}/.local/bin"
+        else
+            BIN_DIR="${HOME}/.local/bin"
+        fi
+    else
+        BIN_DIR="/usr/local/bin"
+    fi
 else
     BIN_DIR="${HOME}/.local/bin"
 fi
