@@ -6,6 +6,15 @@
 
 set -e
 
+# --- Environment Preparation (Termux / Android / Restricted environments) ---
+if [ -z "$TMPDIR" ] || [ ! -d "$TMPDIR" ]; then
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX/tmp" ]; then
+        export TMPDIR="$PREFIX/tmp"
+    elif [ -d "/data/data/com.termux/files/usr/tmp" ]; then
+        export TMPDIR="/data/data/com.termux/files/usr/tmp"
+    fi
+fi
+
 # --- Terminal Styling (Google Material Colors) ---
 if [ -t 1 ]; then
     COLOR_RESET="\033[0m"
@@ -98,10 +107,18 @@ if [ "$PLATFORM" = "unknown" ] || [ "$ARCH" = "unknown" ]; then
     exit 1
 fi
 
+# Detect Termux on Android
+IS_TERMUX=0
+if [ -n "$TERMUX_VERSION" ] || [ -d "/data/data/com.termux" ] || [ "$(uname -o 2>/dev/null)" = "Android" ]; then
+    IS_TERMUX=1
+elif [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [[ "$PREFIX" == *"com.termux"* ]]; then
+    IS_TERMUX=1
+fi
+
 # Detect atomic / immutable Linux (Bazzite, Fedora Silverblue, SteamOS, openSUSE MicroOS, NixOS)
 IS_ATOMIC=0
 ATOMIC_NAME=""
-if [ "$PLATFORM" = "linux" ]; then
+if [ "$PLATFORM" = "linux" ] && [ "$IS_TERMUX" -eq 0 ]; then
     if [ -f /run/ostree-booted ] || [ -d /sysroot/ostree ]; then
         IS_ATOMIC=1
         ATOMIC_NAME="ostree"
@@ -114,16 +131,27 @@ if [ "$PLATFORM" = "linux" ]; then
     fi
 fi
 
-if [ "$IS_ATOMIC" -eq 1 ] && [ -n "$ATOMIC_NAME" ]; then
+if [ "$IS_TERMUX" -eq 1 ]; then
+    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}Android / Termux${COLOR_RESET} (${ARCH})"
+elif [ "$IS_ATOMIC" -eq 1 ] && [ -n "$ATOMIC_NAME" ]; then
     echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH}) [Атомарный дистрибутив: ${ATOMIC_NAME}]"
 else
     echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH})"
 fi
 
 # --- Step 2: Determine Target Paths ---
+# In Termux on Android, $PREFIX/bin is the official standard PATH.
 # On atomic / immutable systems, rootfs (/usr) is read-only.
-# We always install safely to ~/.local/bin without modifying ostree layers.
-if [ "$(id -u)" -eq 0 ]; then
+# We always install safely without modifying ostree layers.
+if [ "$IS_TERMUX" -eq 1 ]; then
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+        BIN_DIR="$PREFIX/bin"
+    elif [ -d "/data/data/com.termux/files/usr/bin" ]; then
+        BIN_DIR="/data/data/com.termux/files/usr/bin"
+    else
+        BIN_DIR="${HOME}/.local/bin"
+    fi
+elif [ "$(id -u)" -eq 0 ]; then
     if [ "$IS_ATOMIC" -eq 1 ] || [ ! -w /usr/local ]; then
         if [ -n "$SUDO_USER" ]; then
             TARGET_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
@@ -199,6 +227,38 @@ prepare_binary() {
         return 1
     fi
     chmod +x "$dest"
+
+    # In Termux on Android, run termux-elf-cleaner if available
+    if command -v termux-elf-cleaner >/dev/null 2>&1; then
+        termux-elf-cleaner "$dest" >/dev/null 2>&1 || true
+    fi
+
+    # Verify if downloaded binary executes cleanly
+    if "$dest" --version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    # Fallback build from source if prebuilt binary fails and cargo is available
+    if [ -n "$cargo_bin" ]; then
+        local temp_build_dir
+        temp_build_dir="$(mktemp -d)"
+        if git clone --depth 1 https://github.com/Milordick/rust-antigravity-patcher.git "$temp_build_dir" >/dev/null 2>&1; then
+            (
+                cd "${temp_build_dir}/rust"
+                "$cargo_bin" build --release --quiet
+            )
+            local built_bin="${temp_build_dir}/rust/target/release/agyptch"
+            if [ -f "$built_bin" ]; then
+                rm -f "$dest"
+                cp "$built_bin" "$dest"
+                chmod +x "$dest"
+                rm -rf "$temp_build_dir"
+                return 0
+            fi
+            rm -rf "$temp_build_dir"
+        fi
+    fi
+
     return 0
 }
 
@@ -209,8 +269,15 @@ run_animated "Установка исполняемого файла agyptch в 
 create_alias() {
     local target_alias="${BIN_DIR}/open-ag-patcher"
     rm -f "$target_alias"
-    ln -s "${TARGET_EXEC}" "$target_alias" 2>/dev/null || cp "${TARGET_EXEC}" "$target_alias"
+    ln -sf "${TARGET_EXEC}" "$target_alias" 2>/dev/null || cp -f "${TARGET_EXEC}" "$target_alias"
     chmod +x "$target_alias"
+
+    # In Termux or general systems, also sync ~/.local/bin to clean up any old broken files
+    if [ -d "${HOME}/.local/bin" ] && [ "${BIN_DIR}" != "${HOME}/.local/bin" ]; then
+        rm -f "${HOME}/.local/bin/agyptch" "${HOME}/.local/bin/open-ag-patcher"
+        ln -sf "${TARGET_EXEC}" "${HOME}/.local/bin/agyptch" 2>/dev/null || true
+        ln -sf "${TARGET_EXEC}" "${HOME}/.local/bin/open-ag-patcher" 2>/dev/null || true
+    fi
 }
 run_animated "Создание дополнительного алиаса 'open-ag-patcher'" create_alias
 
