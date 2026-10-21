@@ -115,6 +115,10 @@ elif [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [[ "$PREFIX" == *"com.termux"* 
     IS_TERMUX=1
 fi
 
+if [ "$IS_TERMUX" -eq 1 ]; then
+    PLATFORM="android"
+fi
+
 # Detect atomic / immutable Linux (Bazzite, Fedora Silverblue, SteamOS, openSUSE MicroOS, NixOS)
 IS_ATOMIC=0
 ATOMIC_NAME=""
@@ -217,7 +221,8 @@ prepare_binary() {
     fi
 
     # Fallback: Download prebuilt binary from GitHub Release
-    local download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-${PLATFORM}-${ARCH}"
+    local target_asset="agyptch-${PLATFORM}-${ARCH}"
+    local download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
     local checksums_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/checksums.txt"
 
     local tmp_download
@@ -225,11 +230,29 @@ prepare_binary() {
     local tmp_checksums
     tmp_checksums="$(mktemp)"
 
+    local download_ok=0
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$download_url" -o "$tmp_download"
+        if curl -fsSL "$download_url" -o "$tmp_download"; then
+            download_ok=1
+        elif [ "$PLATFORM" = "android" ]; then
+            # Fallback to linux-arm64 if android-arm64 is not yet cached or found
+            target_asset="agyptch-linux-${ARCH}"
+            download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
+            if curl -fsSL "$download_url" -o "$tmp_download"; then
+                download_ok=1
+            fi
+        fi
         curl -fsSL "$checksums_url" -o "$tmp_checksums" 2>/dev/null || true
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$tmp_download" "$download_url"
+        if wget -qO "$tmp_download" "$download_url"; then
+            download_ok=1
+        elif [ "$PLATFORM" = "android" ]; then
+            target_asset="agyptch-linux-${ARCH}"
+            download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
+            if wget -qO "$tmp_download" "$download_url"; then
+                download_ok=1
+            fi
+        fi
         wget -qO "$tmp_checksums" "$checksums_url" 2>/dev/null || true
     else
         rm -f "$tmp_download" "$tmp_checksums"
@@ -237,9 +260,15 @@ prepare_binary() {
         return 1
     fi
 
+    if [ $download_ok -ne 1 ] || [ ! -s "$tmp_download" ]; then
+        rm -f "$tmp_download" "$tmp_checksums"
+        echo "Не удалось загрузить бинарник для ${PLATFORM}-${ARCH} с GitHub Releases." >&2
+        return 1
+    fi
+
     # Verify SHA-256 checksum if checksums.txt is available
     if [ -s "$tmp_checksums" ]; then
-        local expected_name="agyptch-${PLATFORM}-${ARCH}"
+        local expected_name="${target_asset}"
         local expected_hash
         expected_hash="$(grep -E "[[:space:]]\*?${expected_name}\$" "$tmp_checksums" 2>/dev/null | awk '{print $1}')"
         if [ -n "$expected_hash" ]; then
@@ -363,9 +392,9 @@ run_animated "Регистрация ${BIN_DIR} в системном окруж
 
 # --- Step 6: Verify Installation ---
 verify_installation() {
-    "${BIN_DIR}/agyptch" --version >/dev/null 2>&1
+    "${BIN_DIR}/agyptch" --version
 }
-run_animated "Проверка целостности и готовности утилиты" verify_installation
+run_animated "Проверка запуска и готовности утилиты" verify_installation
 
 # --- Final Success Summary Card ---
 VERSION_INFO="$("${BIN_DIR}/agyptch" --version 2>/dev/null || echo "v1.4.0 (Rust Edition)")"

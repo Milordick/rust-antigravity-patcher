@@ -24,10 +24,16 @@ jobs:
             use_cross: false
             install_musl: true
 
-          # Linux ARM64 (aarch64) - fully static musl binary for Linux & Android / Termux
+          # Linux ARM64 (aarch64) - fully static-pie musl binary for Linux
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             output: agyptch-linux-arm64
+            use_cross: true
+
+          # Android ARM64 (aarch64) - native Android Bionic binary for Termux
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            output: agyptch-android-arm64
             use_cross: true
 
           # macOS (Apple Silicon + Intel on a single runner to avoid queue bottlenecks)
