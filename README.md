@@ -11,26 +11,30 @@
 Универсальные скрипты установки автоматически настраивают окружение, прописывают утилиту в системный `PATH` и создают удобную короткую команду **`agyptch`** для мгновенного вызова из любого каталога.
 
 ### Linux / macOS
-Установка в один клик через `curl` или локальный запуск:
-```bash
-# Через curl (из репозитория):
-curl -fsSL https://raw.githubusercontent.com/Milordick/rust-antigravity-patcher/main/install.sh | bash
 
-# Или локально из папки с проектом:
+Установка в один клик через `curl`:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Milordick/rust-antigravity-patcher/main/install.sh | bash
+```
+
+Или локально из папки с проектом:
+```bash
 ./install.sh
 ```
 
 ### Windows (PowerShell)
-Установка в один клик через `irm` или запуск локального скрипта:
+
+Установка в один клик через PowerShell (`irm`):
 ```powershell
-# Через PowerShell (из репозитория):
 irm https://raw.githubusercontent.com/Milordick/rust-antigravity-patcher/main/install.ps1 | iex
-
-# Или локально в PowerShell:
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-
-# Либо двойным кликом по файлу install.bat
 ```
+
+Или локально в PowerShell:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+*(Либо двойным кликом по файлу `install.bat`)*
 
 После завершения установки утилита доступна глобально в любом терминале по команде:
 ```bash
