@@ -1,0 +1,32 @@
+[package]
+name = "agyptch"
+version = "1.4.0"
+edition = "2021"
+authors = ["Coshick", "AvenCores"]
+repository = "https://github.com/Milordick/rust-antigravity-patcher"
+description = "Ultra-fast native Antigravity patcher in Rust"
+
+[lib]
+name = "open_ag_patcher"
+path = "src/lib.rs"
+
+[[bin]]
+name = "agyptch"
+path = "src/main.rs"
+
+[dependencies]
+regex = "1.13"
+memmap2 = "0.9"
+memchr = "2.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+crossterm = "0.29"
+ratatui = "0.30"
+sha2 = "0.11"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

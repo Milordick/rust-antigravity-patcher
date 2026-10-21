@@ -1,0 +1,327 @@
+//! Antigravity CLI (agy) binary patcher and discovery.
+//! Bypasses:
+//! 1. Eligibility screen (CLI_GATE)
+//! 2. Internal auth gate (AUTH_GATE)
+//! 3. Print-mode eligibility (PRINT_ELIGIBILITY_GATE)
+
+use std::fs::{self, File};
+use std::path::{Path, PathBuf};
+use memmap2::Mmap;
+
+use crate::core::arch::{detect_arch, Arch};
+use crate::core::bounds::get_code_bounds;
+use crate::core::gate::{Gate, GateStatus, MultiGate};
+use crate::core::atomic::fast_apply_patches;
+use crate::core::backup::{make_backup, restore_backup};
+use crate::core::cache::{drop_cached, get_cached, put_cached};
+
+pub const BAK_EXT: &str = ".agybak";
+
+pub struct AgyGates {
+    pub cli_gate: MultiGate,
+    pub auth_gate: MultiGate,
+    pub print_gate: Gate,
+}
+
+impl AgyGates {
+    pub fn new() -> Result<Self, regex::Error> {
+        // Gate 1: CLI_GATE
+        let cli_x64 = Gate::new(
+            r"\x48\x85\xc0\x0f\x84....\x80\x78\x08\x00\x0f\x85....",
+            r"\x48\x85\xc0\x0f\x84....\x48\x85\xc0\x90\x0f\x85....",
+            b"\x48\x85\xc0\x90",
+            9,
+            "eligibility screen off (x64)",
+            Some(Arch::X64),
+            Some((b"\x80\x78\x08\x00", 9)),
+            Some((b"\x48\x85\xc0\x90", 9)),
+            false,
+        )?;
+
+        let cli_arm64_sig = r"...\xb5...\xb4\x01\x20\x40\x39[\x01\x21\x41\x61\x81\xa1\xc1\xe1].[\x00-\x07]\x37...[\x94-\x97](?:\xe0\x4b\x00\xf9\xe1\x33\x00\xf9\xe2\x43\x00\xf9|\xe0\x4f\x00\xf9\xe1\x33\x00\xf9\xe2\x47\x00\xf9\xe3\x2f\x00\xf9)";
+        let cli_arm64_patched = r"...\xb5...\xb4\x21\x00\x80\x52[\x01\x21\x41\x61\x81\xa1\xc1\xe1].[\x00-\x07]\x37...[\x94-\x97](?:\xe0\x4b\x00\xf9\xe1\x33\x00\xf9\xe2\x43\x00\xf9|\xe0\x4f\x00\xf9\xe1\x33\x00\xf9\xe2\x47\x00\xf9\xe3\x2f\x00\xf9)";
+        let cli_arm64 = Gate::new(
+            cli_arm64_sig,
+            cli_arm64_patched,
+            b"\x21\x00\x80\x52",
+            8,
+            "eligibility screen off (arm64)",
+            Some(Arch::Arm64),
+            Some((b"\x01\x20\x40\x39", 8)),
+            Some((b"\x21\x00\x80\x52", 8)),
+            false,
+        )?;
+
+        let cli_arm64_w4 = Gate::new(
+            r"[\x00\x20\x40\x60\x80\xa0\xc0\xe0]..\xb4\x04\x20\x40\x39[\x04\x24\x44\x64\x84\xa4\xc4\xe4].[\x00-\x07]\x37\x04\x94\x44\xa9",
+            r"[\x00\x20\x40\x60\x80\xa0\xc0\xe0]..\xb4[\x24]\x00\x80\x52[\x04\x24\x44\x64\x84\xa4\xc4\xe4].[\x00-\x07]\x37\x04\x94\x44\xa9",
+            b"\x24\x00\x80\x52",
+            4,
+            "eligibility screen off (arm64, w4)",
+            Some(Arch::Arm64),
+            Some((b"\x04\x20\x40\x39", 4)),
+            Some((b"\x24\x00\x80\x52", 4)),
+            false,
+        )?;
+
+        let cli_arm64_w2 = Gate::new(
+            r"[\x01\x21\x41\x61\x81\xa1\xc1\xe1]..\xb5[\x00\x20\x40\x60\x80\xa0\xc0\xe0]..\xb4\x02\x20\x40\x39[\x02\x22\x42\x62\x82\xa2\xc2\xe2].[\x00-\x07]\x37...[\x94-\x97]",
+            r"[\x01\x21\x41\x61\x81\xa1\xc1\xe1]..\xb5[\x00\x20\x40\x60\x80\xa0\xc0\xe0]..\xb4\x22\x00\x80\x52[\x02\x22\x42\x62\x82\xa2\xc2\xe2].[\x00-\x07]\x37...[\x94-\x97]",
+            b"\x22\x00\x80\x52",
+            8,
+            "eligibility screen off (arm64, w2)",
+            Some(Arch::Arm64),
+            Some((b"\x02\x20\x40\x39", 8)),
+            Some((b"\x22\x00\x80\x52", 8)),
+            false,
+        )?;
+
+        let cli_gate = MultiGate::new(vec![cli_x64, cli_arm64, cli_arm64_w2, cli_arm64_w4], "eligibility screen off");
+
+        // Gate 2: AUTH_GATE
+        let auth_x64 = Gate::new(
+            r"\x80\x78\x08\x00\x74.\x48\x8b.[\x24].\x48\x89.\x60",
+            r"\xc6\x40\x08\x01\x90\x90\x48\x8b.[\x24].\x48\x89.\x60",
+            b"\xc6\x40\x08\x01\x90\x90",
+            0,
+            "hasValidAuth=true inside agy (x64)",
+            Some(Arch::X64),
+            Some((b"\x80\x78\x08\x00", 0)),
+            Some((b"\xc6\x40\x08\x01", 0)),
+            false,
+        )?;
+
+        let auth_arm64 = Gate::new(
+            r"\x03\x20\x40\x39[\x03\x23\x43\x63\x83\xa3\xc3\xe3]..\x36(?:....){1,2}\x03\x10\x06\xa9",
+            r"\x23\x00\x80\x52\x03\x20\x00\x39(?:....){1,2}\x03\x10\x06\xa9",
+            b"\x23\x00\x80\x52\x03\x20\x00\x39",
+            0,
+            "hasValidAuth=true inside agy (arm64)",
+            Some(Arch::Arm64),
+            Some((b"\x03\x20\x40\x39", 0)),
+            Some((b"\x23\x00\x80\x52", 0)),
+            false,
+        )?;
+
+        let auth_gate = MultiGate::new(vec![auth_x64, auth_arm64], "hasValidAuth=true inside agy");
+
+        // Gate 3: PRINT_ELIGIBILITY_GATE (x64)
+        let print_gate = Gate::new(
+            r"\x48\x85\xc0\x0f\x85....\x48\x85\xc9\x0f\x84....\x80\x79\x08\x00\x0f\x85....",
+            r"\x48\x85\xc0\x0f\x85....\x48\x85\xc9\x0f\x84....\x48\x85\xc9\x90\x0f\x85....",
+            b"\x48\x85\xc9\x90",
+            18,
+            "print-mode eligibility (rcx) off (x64)",
+            Some(Arch::X64),
+            Some((b"\x80\x79\x08\x00", 18)),
+            Some((b"\x48\x85\xc9\x90", 18)),
+            false,
+        )?;
+
+        Ok(Self {
+            cli_gate,
+            auth_gate,
+            print_gate,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AgyStatus {
+    pub exists: bool,
+    pub is_patched: bool,
+    pub file_size: u64,
+}
+
+pub fn check_agy_status(path: &Path) -> AgyStatus {
+    if !path.is_file() {
+        return AgyStatus {
+            exists: false,
+            is_patched: false,
+            file_size: 0,
+        };
+    }
+
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => {
+            return AgyStatus {
+                exists: true,
+                is_patched: false,
+                file_size: 0,
+            }
+        }
+    };
+    let sz = meta.len();
+
+    // Check cache
+    if let Some(val) = get_cached(path) {
+        if let Some(arr) = val.as_array() {
+            if !arr.is_empty() {
+                let state = arr[0].as_str().unwrap_or("");
+                return AgyStatus {
+                    exists: true,
+                    is_patched: state == "patched",
+                    file_size: sz,
+                };
+            }
+        }
+    }
+
+    let f = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => {
+            return AgyStatus {
+                exists: true,
+                is_patched: false,
+                file_size: sz,
+            }
+        }
+    };
+
+    let mmap = match unsafe { Mmap::map(&f) } {
+        Ok(m) => m,
+        Err(_) => {
+            return AgyStatus {
+                exists: true,
+                is_patched: false,
+                file_size: sz,
+            }
+        }
+    };
+
+    let arch = detect_arch(&mmap);
+    let bounds = get_code_bounds(&mmap);
+    let gates = match AgyGates::new() {
+        Ok(g) => g,
+        Err(_) => {
+            return AgyStatus {
+                exists: true,
+                is_patched: false,
+                file_size: sz,
+            }
+        }
+    };
+
+    // Check Gate 1
+    let g1 = gates.cli_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
+    // Check Gate 2
+    let g2 = gates.auth_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
+    // Check Gate 3 (x64 only, on arm64 skip or treat as ok)
+    let g3 = if arch == Arch::X64 {
+        gates.print_gate.find(&mmap, Some(arch), Some(1), bounds).map(|(s, _)| s == GateStatus::Patched).unwrap_or(false)
+    } else {
+        true
+    };
+
+    let is_patched = g1 && g2 && g3;
+    let state_str = if is_patched { "patched" } else { "unpatched" };
+    put_cached(path, serde_json::json!([state_str, null]));
+
+    AgyStatus {
+        exists: true,
+        is_patched,
+        file_size: sz,
+    }
+}
+
+pub fn apply_agy_patch(path: &Path) -> Result<bool, String> {
+    if !path.is_file() {
+        return Err(format!("agy binary not found: {}", path.display()));
+    }
+
+    let f = File::open(path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
+    let mmap = unsafe { Mmap::map(&f) }.map_err(|e| format!("cannot mmap {}: {}", path.display(), e))?;
+
+    let arch = detect_arch(&mmap);
+    let bounds = get_code_bounds(&mmap);
+    let gates = AgyGates::new().map_err(|e| e.to_string())?;
+
+    let mut patches = Vec::new();
+
+    // 1. Gate 1
+    let (s1, off1, _) = gates.cli_gate.resolve(&mmap, Some(arch), bounds)?;
+    if s1 != GateStatus::Patched {
+        let fix: &[u8] = match arch {
+            Arch::Arm64 => b"\x21\x00\x80\x52",
+            _ => b"\x48\x85\xc0\x90",
+        };
+        patches.push((off1, fix));
+    }
+
+    // 2. Gate 2
+    let (s2, off2, _) = gates.auth_gate.resolve(&mmap, Some(arch), bounds)?;
+    if s2 != GateStatus::Patched {
+        let fix: &[u8] = match arch {
+            Arch::Arm64 => b"\x23\x00\x80\x52\x03\x20\x00\x39",
+            _ => b"\xc6\x40\x08\x01\x90\x90",
+        };
+        patches.push((off2, fix));
+    }
+
+    // 3. Gate 3 (x64)
+    if arch == Arch::X64 {
+        if let Ok((s3, offsets)) = gates.print_gate.find(&mmap, Some(arch), None, bounds) {
+            if s3 != GateStatus::Patched {
+                for off in offsets {
+                    patches.push((off, b"\x48\x85\xc9\x90" as &[u8]));
+                }
+            }
+        }
+    }
+
+    if patches.is_empty() {
+        return Ok(false); // already fully patched
+    }
+
+    drop(mmap);
+    drop(f);
+
+    // Backup
+    make_backup(path, BAK_EXT).map_err(|e| format!("backup failed: {}", e))?;
+
+    fast_apply_patches(path, &patches).map_err(|e| format!("write patch failed: {}", e))?;
+
+    drop_cached(path);
+    Ok(true)
+}
+
+pub fn restore_agy(path: &Path) -> Result<bool, String> {
+    let restored = restore_backup(path, BAK_EXT)
+        .map_err(|e| format!("restore failed: {}", e))?;
+    if restored {
+        drop_cached(path);
+    }
+    Ok(restored)
+}
+
+pub fn find_agy_binary() -> Option<PathBuf> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let home_path = Path::new(&home);
+
+    let candidates = [
+        home_path.join(".local/bin/agy"),
+        PathBuf::from("/usr/local/bin/agy"),
+        PathBuf::from("/usr/bin/agy"),
+        #[cfg(target_os = "windows")]
+        home_path.join(".local/bin/agy.exe"),
+    ];
+
+    for c in &candidates {
+        if c.is_file() {
+            return Some(c.clone());
+        }
+    }
+
+    // Search PATH
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let p = dir.join(if cfg!(windows) { "agy.exe" } else { "agy" });
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
