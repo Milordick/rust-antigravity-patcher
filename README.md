@@ -1,5 +1,19 @@
 # Open AG Patcher (Rust Edition) v1.4.0
 
+<p align="center">
+  <strong>Автономная, сверхбыстрая утилита для снятия региональных блокировок в экосистеме Google Antigravity.</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Milordick/rust-antigravity-patcher/releases/latest"><img src="https://img.shields.io/badge/LATEST%20RELEASE-V1.4.0-7950f2?style=for-the-badge&logo=github&logoColor=white" alt="Latest Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-GPL%20V3-007ec6?style=for-the-badge" alt="License"></a>
+  <img src="https://img.shields.io/badge/PLATFORM-LINUX%20%7C%20ANDROID%20%7C%20MACOS%20%7C%20WIN-4caf50?style=for-the-badge" alt="Platform">
+</p>
+<p align="center">
+  <img src="https://img.shields.io/badge/ARCHITECTURE-X86__64%20%7C%20ARM64-f0652f?style=for-the-badge" alt="Architecture">
+  <a href="https://pay.cloudtips.ru/p/0ef570e5" target="_blank"><img src="https://img.shields.io/badge/SUPPORT-DONATE-ff5252?style=for-the-badge" alt="Donate"></a>
+</p>
+
 Автономная, сверхбыстрая утилита для снятия региональных блокировок и обхода проверки аккаунта в **Google Antigravity** (РФ, РБ и любые другие заблокированные регионы).
 
 Позволяет полноценно запускать и использовать редактор кода **Antigravity IDE**, сервер языковых моделей **Antigravity 2.0 (Language Server)**, консольный интерфейс **agy CLI** и официальное расширение для **VS Code** без ошибок доступа.
@@ -207,6 +221,20 @@ cargo build --release
   - SourceForge оригинала: [https://sourceforge.net/projects/open-antigravity-patcher/](https://sourceforge.net/projects/open-antigravity-patcher/)
   - GitHub: [https://github.com/AvenCores/open-antigravity-patcher](https://github.com/AvenCores/open-antigravity-patcher)
 - Базовые исследования смещений гейтов опираются на наработки [QNIX-Dev/eligibility-antigravity-patcher](https://github.com/QNIX-Dev/eligibility-antigravity-patcher).
+
+---
+
+## 💖 Поддержка автора
+
+Если проект оказался для вас полезным, сэкономил время и помог комфортно работать с Antigravity на ПК или в Termux на телефоне, вы можете поддержать автора и дальнейшее развитие проекта:
+
+<p align="left">
+  <a href="https://pay.cloudtips.ru/p/0ef570e5" target="_blank">
+    <img src="https://img.shields.io/badge/SUPPORT-DONATE-ff5252?style=for-the-badge" alt="Поддержать автора (CloudTips)">
+  </a>
+</p>
+
+👉 **Прямая ссылка:** [pay.cloudtips.ru/p/0ef570e5](https://pay.cloudtips.ru/p/0ef570e5)
 
 ---
 
