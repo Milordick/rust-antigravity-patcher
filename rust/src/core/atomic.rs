@@ -14,21 +14,69 @@ pub fn fast_apply_patches(path: &Path, patches: &[(usize, &[u8])]) -> std::io::R
     // Try fast in-place direct seek + write
     match OpenOptions::new().read(true).write(true).open(path) {
         Ok(mut f) => {
-            let mut write_err = None;
+            let file_len = f.metadata()?.len();
+
+            // 1. Boundary check: ensure all patches fit strictly within the file
+            let mut in_bounds = true;
             for &(offset, fix) in patches {
-                if let Err(e) = f.seek(SeekFrom::Start(offset as u64)) {
-                    write_err = Some(e);
-                    break;
-                }
-                if let Err(e) = f.write_all(fix) {
-                    write_err = Some(e);
+                if (offset as u64).saturating_add(fix.len() as u64) > file_len {
+                    in_bounds = false;
                     break;
                 }
             }
-            if write_err.is_none() {
-                if let Ok(()) = f.flush() {
-                    return Ok(());
+
+            if in_bounds {
+                // 2. Read original bytes in case we need to rollback partial writes
+                let mut original_bytes: Vec<Vec<u8>> = Vec::with_capacity(patches.len());
+                let mut read_ok = true;
+                for &(offset, fix) in patches {
+                    if f.seek(SeekFrom::Start(offset as u64)).is_err() {
+                        read_ok = false;
+                        break;
+                    }
+                    let mut orig = vec![0u8; fix.len()];
+                    if f.read_exact(&mut orig).is_err() {
+                        read_ok = false;
+                        break;
+                    }
+                    original_bytes.push(orig);
                 }
+
+                if read_ok {
+                    let mut applied_count = 0;
+                    let mut write_err = None;
+                    for &(offset, fix) in patches {
+                        if let Err(e) = f.seek(SeekFrom::Start(offset as u64)) {
+                            write_err = Some(e);
+                            break;
+                        }
+                        if let Err(e) = f.write_all(fix) {
+                            write_err = Some(e);
+                            break;
+                        }
+                        applied_count += 1;
+                    }
+
+                    if write_err.is_none() {
+                        if f.flush().is_ok() {
+                            return Ok(());
+                        }
+                    } else if applied_count > 0 {
+                        // Rollback already applied patches to restore pristine state
+                        for i in 0..applied_count {
+                            let (offset, _) = patches[i];
+                            let orig = &original_bytes[i];
+                            let _ = f.seek(SeekFrom::Start(offset as u64));
+                            let _ = f.write_all(orig);
+                        }
+                        let _ = f.flush();
+                    }
+                }
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "patch offset exceeds file length",
+                ));
             }
         }
         Err(_) => {
@@ -44,7 +92,14 @@ pub fn fast_apply_patches(path: &Path, patches: &[(usize, &[u8])]) -> std::io::R
 
     let res = (|| -> std::io::Result<()> {
         let mut f = OpenOptions::new().read(true).write(true).open(tmp_path)?;
+        let file_len = f.metadata()?.len();
         for &(offset, fix) in patches {
+            if (offset as u64).saturating_add(fix.len() as u64) > file_len {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "patch offset exceeds file length",
+                ));
+            }
             f.seek(SeekFrom::Start(offset as u64))?;
             f.write_all(fix)?;
         }
@@ -104,8 +159,59 @@ pub fn apply_string_replacement(
         }
     }
 
-    fs::rename(tmp_path, path)
-        .map_err(|e| format!("cannot replace original file {}: {}", path.display(), e))?;
+    let rename_res = fs::rename(tmp_path, path);
+    if rename_res.is_err() && tmp_path.exists() {
+        let _ = fs::remove_file(tmp_path);
+    }
+    rename_res.map_err(|e| format!("cannot replace original file {}: {}", path.display(), e))?;
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_atomic_in_place_success() {
+        let tmp_file = std::env::temp_dir().join(format!("agy_test_atomic_{}.bin", std::process::id()));
+        fs::write(&tmp_file, b"HELLO WORLD 12345").unwrap();
+
+        fast_apply_patches(&tmp_file, &[(6, b"RUST!")]).unwrap();
+
+        let updated = fs::read(&tmp_file).unwrap();
+        assert_eq!(&updated[..11], b"HELLO RUST!");
+
+        let _ = fs::remove_file(&tmp_file);
+    }
+
+    #[test]
+    fn test_atomic_out_of_bounds_rejection() {
+        let tmp_file = std::env::temp_dir().join(format!("agy_test_bounds_{}.bin", std::process::id()));
+        fs::write(&tmp_file, b"SHORT").unwrap();
+
+        let res = fast_apply_patches(&tmp_file, &[(100, b"OVERFLOW")]);
+        assert!(res.is_err());
+
+        let content = fs::read(&tmp_file).unwrap();
+        assert_eq!(content, b"SHORT");
+
+        let _ = fs::remove_file(&tmp_file);
+    }
+
+    #[test]
+    fn test_apply_string_replacement() {
+        let tmp_file = std::env::temp_dir().join(format!("agy_test_str_{}.txt", std::process::id()));
+        fs::write(&tmp_file, "shouldCheckEligibility() { return false; }").unwrap();
+
+        let changed = apply_string_replacement(&tmp_file, |s| {
+            Ok(s.replace("return false;", "return true;"))
+        }).unwrap();
+
+        assert!(changed);
+        let content = fs::read_to_string(&tmp_file).unwrap();
+        assert_eq!(content, "shouldCheckEligibility() { return true; }");
+
+        let _ = fs::remove_file(&tmp_file);
+    }
 }

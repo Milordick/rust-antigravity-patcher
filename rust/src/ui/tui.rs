@@ -253,7 +253,10 @@ impl AppState {
         // 1. IDE
         if let Some(ref p) = ide_p {
             let st = check_ide_status(p);
-            let (bak_found, bak_sz) = check_backup_file(p, ".agybak");
+            let (bak_found, bak_sz) = {
+                let (found, sz) = check_backup_file(p, ".agybak");
+                if found { (found, sz) } else { check_backup_file(p, ".bak") }
+            };
             let sha256 = file_sha256(p);
             items.push(TargetItem {
                 name: "Antigravity IDE",
@@ -289,7 +292,10 @@ impl AppState {
         // 2. Manager
         if let Some(ref p) = mgr_p {
             let st = check_manager_status(p);
-            let (bak_found, bak_sz) = check_backup_file(p, ".agybak");
+            let (bak_found, bak_sz) = {
+                let (found, sz) = check_backup_file(p, ".agybak");
+                if found { (found, sz) } else { check_backup_file(p, ".bak") }
+            };
             let arch = read_binary_arch(p);
             let sha256 = file_sha256(p);
             items.push(TargetItem {
@@ -326,7 +332,10 @@ impl AppState {
         // 3. CLI
         if let Some(ref p) = agy_p {
             let st = check_agy_status(p);
-            let (bak_found, bak_sz) = check_backup_file(p, ".agybak");
+            let (bak_found, bak_sz) = {
+                let (found, sz) = check_backup_file(p, ".agybak");
+                if found { (found, sz) } else { check_backup_file(p, ".bak") }
+            };
             let arch = read_binary_arch(p);
             let sha256 = file_sha256(p);
             items.push(TargetItem {
@@ -399,7 +408,10 @@ impl AppState {
         // 5. VS Code Binary
         if let Some(ref p) = vagy_p {
             let st = check_agy_status(p);
-            let (bak_found, bak_sz) = check_backup_file(p, ".agybak");
+            let (bak_found, bak_sz) = {
+                let (found, sz) = check_backup_file(p, ".agybak");
+                if found { (found, sz) } else { check_backup_file(p, ".bak") }
+            };
             let arch = read_binary_arch(p);
             let sha256 = file_sha256(p);
             items.push(TargetItem {

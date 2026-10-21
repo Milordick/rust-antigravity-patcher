@@ -127,14 +127,53 @@ Write-StepAnimated "Установка исполняемого файла в $i
 
     # 3. Fallback: Download prebuilt binary from GitHub Releases
     $downloadUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-$arch.exe"
+    $checksumsUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/checksums.txt"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $tempExe = "$targetExe.download"
+    $usedUrl = $downloadUrl
+
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $targetExe -UseBasicParsing
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempExe -UseBasicParsing
     } catch {
         # Fallback to x86_64 (Windows on ARM runs x64 via built-in Prism emulator)
-        $fallbackUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
-        Invoke-WebRequest -Uri $fallbackUrl -OutFile $targetExe -UseBasicParsing
+        $usedUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
+        Invoke-WebRequest -Uri $usedUrl -OutFile $tempExe -UseBasicParsing
     }
+
+    # Verify SHA-256 checksum if checksums.txt is available
+    $tempChecksums = Join-Path $env:TEMP "agy_checksums_$pid.txt"
+    try {
+        Invoke-WebRequest -Uri $checksumsUrl -OutFile $tempChecksums -UseBasicParsing -ErrorAction SilentlyContinue
+        if (Test-Path $tempChecksums) {
+            $expectedFileName = [System.IO.Path]::GetFileName($usedUrl)
+            $actualHash = (Get-FileHash -Path $tempExe -Algorithm SHA256).Hash.ToLower()
+            $lines = Get-Content $tempChecksums
+            foreach ($line in $lines) {
+                if ($line -match "([a-fA-F0-9]{64})\s+\*?(.+)") {
+                    $hash = $matches[1].ToLower()
+                    $file = $matches[2].Trim()
+                    if ($file -eq $expectedFileName) {
+                        if ($hash -ne $actualHash) {
+                            Remove-Item -Path $tempExe -Force -ErrorAction SilentlyContinue
+                            Remove-Item -Path $tempChecksums -Force -ErrorAction SilentlyContinue
+                            throw "Не совпала контрольная сумма SHA-256 для $expectedFileName"
+                        }
+                        break
+                    }
+                }
+            }
+        }
+    } catch {
+        if ($_.Exception.Message -like "*Не совпала контрольная сумма*") {
+            throw $_
+        }
+    } finally {
+        if (Test-Path $tempChecksums) {
+            Remove-Item -Path $tempChecksums -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Move-Item -Path $tempExe -Destination $targetExe -Force
 }
 
 # --- Step 4: Create 'agyptch' Command Wrappers ---

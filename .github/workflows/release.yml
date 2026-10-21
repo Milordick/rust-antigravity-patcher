@@ -123,6 +123,12 @@ jobs:
               cp "$f" "$legacy"
             fi
           done
+          # Generate SHA-256 checksums file for supply-chain integrity verification
+          (
+            cd upload
+            sha256sum * > checksums.txt
+          )
+          cat upload/checksums.txt
           ls -la upload/
 
       - name: Create or Update Release

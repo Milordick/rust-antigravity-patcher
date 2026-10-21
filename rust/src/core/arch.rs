@@ -52,13 +52,13 @@ pub fn detect_arch(data: &[u8]) -> Arch {
         return Arch::Other;
     }
 
-    // Mach-O
-    let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-    if magic == 0xFEEDFACE || magic == 0xFEEDFACF {
+    // Mach-O (Single Architecture - Big Endian)
+    let magic_be = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    if magic_be == 0xFEEDFACE || magic_be == 0xFEEDFACF {
         if data.len() < 8 {
             return Arch::Other;
         }
-        let cputype = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let cputype = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
         return match cputype {
             0x01000007 => Arch::X64,
             0x0100000C => Arch::Arm64,
@@ -66,7 +66,7 @@ pub fn detect_arch(data: &[u8]) -> Arch {
         };
     }
 
-    // Mach-O little-endian magic
+    // Mach-O (Single Architecture - Little Endian)
     let magic_le = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
     if magic_le == 0xFEEDFACE || magic_le == 0xFEEDFACF {
         if data.len() < 8 {
@@ -78,6 +78,52 @@ pub fn detect_arch(data: &[u8]) -> Arch {
             0x0100000C => Arch::Arm64,
             _ => Arch::Other,
         };
+    }
+
+    // Mach-O Universal / Fat Binary (0xCAFEBABE or 0xBEBAFECA)
+    let is_fat_be = magic_be == 0xCAFEBABE || magic_be == 0xCAFEBABF;
+    let is_fat_le = magic_le == 0xCAFEBABE || magic_le == 0xCAFEBABF;
+    if is_fat_be || is_fat_le {
+        if data.len() < 8 {
+            return Arch::Other;
+        }
+        let nfat_arch = if is_fat_be {
+            u32::from_be_bytes([data[4], data[5], data[6], data[7]]) as usize
+        } else {
+            u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize
+        };
+
+        let mut has_x64 = false;
+        let mut has_arm64 = false;
+        let count = nfat_arch.min(32);
+
+        for i in 0..count {
+            let offset = 8 + i * 20;
+            if offset + 4 <= data.len() {
+                let cputype = if is_fat_be {
+                    u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+                } else {
+                    u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+                };
+                if cputype == 0x01000007 {
+                    has_x64 = true;
+                } else if cputype == 0x0100000C {
+                    has_arm64 = true;
+                }
+            }
+        }
+
+        if has_x64 && has_arm64 {
+            // If binary supports both architectures, match current host or default to arm64
+            #[cfg(target_arch = "aarch64")]
+            return Arch::Arm64;
+            #[cfg(not(target_arch = "aarch64"))]
+            return Arch::X64;
+        } else if has_arm64 {
+            return Arch::Arm64;
+        } else if has_x64 {
+            return Arch::X64;
+        }
     }
 
     Arch::Other
@@ -101,5 +147,53 @@ mod tests {
         data[..4].copy_from_slice(b"\x7fELF");
         data[0x12..0x14].copy_from_slice(&0xB7u16.to_le_bytes());
         assert_eq!(detect_arch(&data), Arch::Arm64);
+    }
+
+    #[test]
+    fn test_macho_single_x64_le() {
+        let mut data = vec![0u8; 64];
+        data[..4].copy_from_slice(&0xFEEDFACFu32.to_le_bytes());
+        data[4..8].copy_from_slice(&0x01000007u32.to_le_bytes());
+        assert_eq!(detect_arch(&data), Arch::X64);
+    }
+
+    #[test]
+    fn test_macho_single_arm64_le() {
+        let mut data = vec![0u8; 64];
+        data[..4].copy_from_slice(&0xFEEDFACFu32.to_le_bytes());
+        data[4..8].copy_from_slice(&0x0100000Cu32.to_le_bytes());
+        assert_eq!(detect_arch(&data), Arch::Arm64);
+    }
+
+    #[test]
+    fn test_macho_single_x64_be() {
+        let mut data = vec![0u8; 64];
+        data[..4].copy_from_slice(&0xFEEDFACFu32.to_be_bytes());
+        data[4..8].copy_from_slice(&0x01000007u32.to_be_bytes());
+        assert_eq!(detect_arch(&data), Arch::X64);
+    }
+
+    #[test]
+    fn test_macho_single_arm64_be() {
+        let mut data = vec![0u8; 64];
+        data[..4].copy_from_slice(&0xFEEDFACFu32.to_be_bytes());
+        data[4..8].copy_from_slice(&0x0100000Cu32.to_be_bytes());
+        assert_eq!(detect_arch(&data), Arch::Arm64);
+    }
+
+    #[test]
+    fn test_macho_fat_universal() {
+        let mut data = vec![0u8; 128];
+        // FAT_MAGIC (BE)
+        data[..4].copy_from_slice(&0xCAFEBABEu32.to_be_bytes());
+        // 2 architectures
+        data[4..8].copy_from_slice(&2u32.to_be_bytes());
+        // Arch 0: x86_64
+        data[8..12].copy_from_slice(&0x01000007u32.to_be_bytes());
+        // Arch 1: arm64
+        data[28..32].copy_from_slice(&0x0100000Cu32.to_be_bytes());
+
+        let detected = detect_arch(&data);
+        assert!(detected == Arch::X64 || detected == Arch::Arm64);
     }
 }

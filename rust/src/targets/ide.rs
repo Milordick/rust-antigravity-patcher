@@ -95,6 +95,8 @@ pub fn is_already_patched(content: &str) -> bool {
     content.contains(IDE_DONE) && !IDE_RE.is_match(content)
 }
 
+pub const BAK_EXT: &str = ".agybak";
+
 pub fn apply_ide_patch(main_js_path: &Path) -> Result<bool, String> {
     if !main_js_path.is_file() {
         return Err("main.js not found".to_string());
@@ -108,7 +110,7 @@ pub fn apply_ide_patch(main_js_path: &Path) -> Result<bool, String> {
     }
 
     // Backup
-    make_backup(main_js_path, ".bak").map_err(|e| format!("backup failed: {}", e))?;
+    make_backup(main_js_path, BAK_EXT).map_err(|e| format!("backup failed: {}", e))?;
 
     let changed = apply_string_replacement(main_js_path, |raw| {
         let res = IDE_RE.replace_all(raw, "${1}true");
@@ -124,8 +126,13 @@ pub fn apply_ide_patch(main_js_path: &Path) -> Result<bool, String> {
 }
 
 pub fn restore_ide(main_js_path: &Path) -> Result<bool, String> {
-    let restored = restore_backup(main_js_path, ".bak")
+    let mut restored = restore_backup(main_js_path, BAK_EXT)
         .map_err(|e| format!("restore failed: {}", e))?;
+    if !restored {
+        // Fallback for legacy .bak backups
+        restored = restore_backup(main_js_path, ".bak")
+            .map_err(|e| format!("restore failed: {}", e))?;
+    }
     if restored {
         drop_cached(main_js_path);
         clear_ide_caches();

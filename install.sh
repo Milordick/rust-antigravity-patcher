@@ -218,14 +218,51 @@ prepare_binary() {
 
     # Fallback: Download prebuilt binary from GitHub Release
     local download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-${PLATFORM}-${ARCH}"
+    local legacy_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/open-ag-patcher-${PLATFORM}-${ARCH}"
+    local checksums_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/checksums.txt"
+
+    local tmp_download
+    tmp_download="$(mktemp)"
+    local tmp_checksums
+    tmp_checksums="$(mktemp)"
+
     if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "$download_url" -o "$dest" || curl -fsSL "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/open-ag-patcher-${PLATFORM}-${ARCH}" -o "$dest"
+        curl -fsSL "$download_url" -o "$tmp_download" || curl -fsSL "$legacy_url" -o "$tmp_download"
+        curl -fsSL "$checksums_url" -o "$tmp_checksums" 2>/dev/null || true
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$dest" "$download_url" || wget -qO "$dest" "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/open-ag-patcher-${PLATFORM}-${ARCH}"
+        wget -qO "$tmp_download" "$download_url" || wget -qO "$tmp_download" "$legacy_url"
+        wget -qO "$tmp_checksums" "$checksums_url" 2>/dev/null || true
     else
+        rm -f "$tmp_download" "$tmp_checksums"
         echo "Требуется curl или wget для загрузки бинарника." >&2
         return 1
     fi
+
+    # Verify SHA-256 checksum if checksums.txt is available
+    if [ -s "$tmp_checksums" ]; then
+        local expected_name="agyptch-${PLATFORM}-${ARCH}"
+        local expected_hash
+        expected_hash="$(grep -E "[[:space:]]\*?${expected_name}\$" "$tmp_checksums" 2>/dev/null | awk '{print $1}')"
+        if [ -n "$expected_hash" ]; then
+            local actual_hash=""
+            if command -v sha256sum >/dev/null 2>&1; then
+                actual_hash="$(sha256sum "$tmp_download" 2>/dev/null | awk '{print $1}')"
+            elif command -v shasum >/dev/null 2>&1; then
+                actual_hash="$(shasum -a 256 "$tmp_download" 2>/dev/null | awk '{print $1}')"
+            elif command -v openssl >/dev/null 2>&1; then
+                actual_hash="$(openssl dgst -sha256 "$tmp_download" 2>/dev/null | awk '{print $NF}')"
+            fi
+
+            if [ -n "$actual_hash" ] && [ "$actual_hash" != "$expected_hash" ]; then
+                rm -f "$tmp_download" "$tmp_checksums"
+                echo "Ошибка: Не совпала контрольная сумма SHA-256 для ${expected_name}!" >&2
+                return 1
+            fi
+        fi
+    fi
+    rm -f "$tmp_checksums"
+
+    mv -f "$tmp_download" "$dest"
     chmod +x "$dest"
 
     # In Termux on Android, run termux-elf-cleaner if available
