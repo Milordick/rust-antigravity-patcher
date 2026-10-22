@@ -197,10 +197,12 @@ pub fn find_extension_js() -> Option<PathBuf> {
 }
 
 pub fn find_gemini_antigravity_binary() -> Option<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let home_path = Path::new(&home);
 
-    let candidates = [
+    let candidates = vec![
         home_path.join(".gemini/bin/antigravity"),
         home_path.join(".gemini/bin/agy"),
         #[cfg(target_os = "windows")]
@@ -209,11 +211,5 @@ pub fn find_gemini_antigravity_binary() -> Option<PathBuf> {
         home_path.join(".gemini/bin/agy.exe"),
     ];
 
-    for c in &candidates {
-        if c.is_file() {
-            return Some(c.clone());
-        }
-    }
-
-    None
+    super::select_best_binary(candidates)
 }

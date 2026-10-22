@@ -202,37 +202,56 @@ pub fn restore_manager(path: &Path) -> Result<bool, String> {
 }
 
 pub fn find_manager_binary() -> Option<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let home_path = Path::new(&home);
 
-    let candidates = [
+    let mut candidates = vec![
         home_path.join(".local/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
+        home_path.join(".local/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_arm64"),
         home_path.join(".local/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server"),
         home_path.join("Downloads/Antigravity IDE/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
+        home_path.join("Downloads/Antigravity IDE/resources/app/extensions/antigravity/bin/language_server_linux_arm64"),
         home_path.join("Загрузки/Antigravity IDE/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
         PathBuf::from("/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
+        PathBuf::from("/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_arm64"),
         PathBuf::from("/opt/antigravity-ide/resources/app/extensions/antigravity/bin/language_server"),
         PathBuf::from("/usr/lib/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
         PathBuf::from("/usr/share/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
     ];
 
-    for c in &candidates {
-        if c.is_file() {
-            return Some(c.clone());
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let lad = Path::new(&local_app_data);
+            candidates.push(lad.join("Programs/antigravity-ide/resources/bin/language_server.exe"));
+            candidates.push(lad.join("Programs/Antigravity IDE/resources/bin/language_server.exe"));
+            candidates.push(lad.join("antigravity-ide/resources/bin/language_server.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            let pf = Path::new(&prog_files);
+            candidates.push(pf.join("Antigravity IDE/resources/bin/language_server.exe"));
+            candidates.push(pf.join("antigravity-ide/resources/bin/language_server.exe"));
         }
     }
 
     // Check relative to IDE main.js if found
     if let Some(main_js) = crate::targets::ide::find_ide_main_js() {
         if let Some(app_dir) = main_js.parent().and_then(|p| p.parent()) {
-            let bin_dir = app_dir.join("extensions/antigravity/bin");
-            if bin_dir.is_dir() {
-                if let Ok(entries) = fs::read_dir(bin_dir) {
-                    for entry in entries.flatten() {
-                        let p = entry.path();
-                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                        if name.starts_with("language_server") && !name.ends_with(".agybak") && p.is_file() {
-                            return Some(p);
+            let bin_dirs = [
+                app_dir.join("extensions/antigravity/bin"),
+                app_dir.parent().unwrap_or(app_dir).join("bin"),
+            ];
+            for bin_dir in bin_dirs {
+                if bin_dir.is_dir() {
+                    if let Ok(entries) = fs::read_dir(bin_dir) {
+                        for entry in entries.flatten() {
+                            let p = entry.path();
+                            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                            if name.starts_with("language_server") && !name.ends_with(".agybak") && p.is_file() {
+                                candidates.push(p);
+                            }
                         }
                     }
                 }
@@ -240,5 +259,12 @@ pub fn find_manager_binary() -> Option<PathBuf> {
         }
     }
 
-    None
+    // Search PATH
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            candidates.push(dir.join(if cfg!(windows) { "language_server.exe" } else { "language_server" }));
+        }
+    }
+
+    super::select_best_binary(candidates)
 }

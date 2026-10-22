@@ -6,17 +6,18 @@ use open_ag_patcher::targets::ide::{find_ide_main_js, apply_ide_patch, restore_i
 use open_ag_patcher::targets::manager::{find_manager_binary, apply_manager_patch, restore_manager, check_manager_status};
 use open_ag_patcher::targets::agy::{find_agy_binary, apply_agy_patch, restore_agy, check_agy_status};
 use open_ag_patcher::targets::vscode::{find_extension_js, apply_vscode_patch, restore_vscode, check_vscode_status};
+use open_ag_patcher::update::CURRENT_VERSION;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("Open AG Patcher v1.4.0 (Rust Edition)");
+        println!("Open AG Patcher v{} (Rust Edition)", CURRENT_VERSION);
         return;
     }
 
     if args.iter().any(|a| a == "--help" || a == "-h") {
-        println!("Open AG Patcher v1.4.0 (Rust Edition)");
+        println!("Open AG Patcher v{} (Rust Edition)", CURRENT_VERSION);
         println!("Usage: agyptch [OPTIONS] or open-ag-patcher [OPTIONS]");
         println!();
         println!("Options:");

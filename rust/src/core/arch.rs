@@ -1,5 +1,8 @@
 //! Architecture detection for ELF, PE, and Mach-O binaries.
 
+use std::io::Read;
+use std::path::Path;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Arch {
     X64,
@@ -129,6 +132,19 @@ pub fn detect_arch(data: &[u8]) -> Arch {
     Arch::Other
 }
 
+/// Detect the architecture of a file on disk by reading its header only
+/// (first 1024 bytes — enough for ELF, PE with DOS stub, and Mach-O Fat headers).
+/// Returns `Arch::Other` when the file cannot be read or is not a recognized executable format
+/// (ELF/PE/Mach-O). Used by the binary finders to reject installer shims
+/// and wrapper scripts that merely share the target's file name.
+pub fn detect_arch_of_file(path: &Path) -> Arch {
+    let mut buf = [0u8; 1024];
+    let n = std::fs::File::open(path)
+        .and_then(|mut f| f.read(&mut buf))
+        .unwrap_or(0);
+    detect_arch(&buf[..n])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +211,37 @@ mod tests {
 
         let detected = detect_arch(&data);
         assert!(detected == Arch::X64 || detected == Arch::Arm64);
+    }
+
+    #[test]
+    fn test_detect_arch_of_file_pe_windows() {
+        // Construct a valid PE header with e_lfanew at 0x80 (128 bytes)
+        let mut data = vec![0u8; 256];
+        data[0..2].copy_from_slice(b"MZ");
+        let e_lfanew = 0x80u32;
+        data[0x3C..0x40].copy_from_slice(&e_lfanew.to_le_bytes());
+        // PE signature
+        data[0x80..0x84].copy_from_slice(b"PE\0\0");
+        // Machine x86_64 = 0x8664
+        data[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes());
+
+        let dir = std::env::temp_dir().join("arch_pe_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("test_windows.exe");
+        std::fs::write(&p, &data).unwrap();
+
+        assert_eq!(detect_arch_of_file(&p), Arch::X64);
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn test_detect_arch_of_file_rejects_shell_script() {
+        let dir = std::env::temp_dir().join("arch_stub_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("test_stub.sh");
+        std::fs::write(&p, b"#!/bin/bash\necho 'shim'\n").unwrap();
+
+        assert_eq!(detect_arch_of_file(&p), Arch::Other);
+        let _ = std::fs::remove_file(&p);
     }
 }

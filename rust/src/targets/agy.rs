@@ -426,37 +426,46 @@ pub fn restore_agy(path: &Path) -> Result<bool, String> {
 }
 
 pub fn find_agy_binary() -> Option<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let home_path = Path::new(&home);
 
     let prefix = std::env::var("PREFIX").unwrap_or_default();
     let prefix_path = Path::new(&prefix);
 
-    let candidates = [
+    let mut candidates = vec![
         prefix_path.join("bin/agy"),
         PathBuf::from("/data/data/com.termux/files/usr/bin/agy"),
         home_path.join(".local/bin/agy"),
+        home_path.join("bin/agy"),
         PathBuf::from("/usr/local/bin/agy"),
         PathBuf::from("/usr/bin/agy"),
+        PathBuf::from("/opt/antigravity/bin/agy"),
+        PathBuf::from("/opt/antigravity/agy"),
+        PathBuf::from("./agy"),
         #[cfg(target_os = "windows")]
         home_path.join(".local/bin/agy.exe"),
+        #[cfg(target_os = "windows")]
+        PathBuf::from("./agy.exe"),
     ];
 
-    for c in &candidates {
-        if c.is_file() {
-            return Some(c.clone());
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let lad = Path::new(&local_app_data);
+            candidates.push(lad.join("Programs/agy/bin/agy.exe"));
+            candidates.push(lad.join("Programs/agy/agy.exe"));
+            candidates.push(lad.join("agy/bin/agy.exe"));
         }
     }
 
     // Search PATH
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
-            let p = dir.join(if cfg!(windows) { "agy.exe" } else { "agy" });
-            if p.is_file() {
-                return Some(p);
-            }
+            candidates.push(dir.join(if cfg!(windows) { "agy.exe" } else { "agy" }));
         }
     }
 
-    None
+    super::select_best_binary(candidates)
 }

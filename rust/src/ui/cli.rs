@@ -10,6 +10,7 @@ use crate::targets::vscode::{
     check_vscode_status, apply_vscode_patch, restore_vscode, find_extension_js,
     find_gemini_antigravity_binary
 };
+use crate::update::CURRENT_VERSION;
 
 // ANSI color codes
 pub const RESET: &str = "\x1b[0m";
@@ -35,10 +36,12 @@ pub fn format_bytes(bytes: u64) -> String {
 
 pub fn print_banner() {
     let (cols, _) = crossterm::terminal::size().unwrap_or((80, 24));
+    let ver_label = format!("v{} │", CURRENT_VERSION);
+    let ver_label_full = format!("v{} ║", CURRENT_VERSION);
     if cols < 52 {
         println!();
         println!("  {CYAN}┌────────────────────────────────────────┐{RESET}");
-        println!("  {CYAN}│{RESET} {BOLD}{WHITE}Open AG Patcher (Rust){RESET}          {CYAN}v1.4.0 │{RESET}");
+        println!("  {CYAN}│{RESET} {BOLD}{WHITE}Open AG Patcher (Rust){RESET}          {CYAN}{ver_label}{RESET}");
         println!("  {CYAN}│{RESET} Region bypass for Antigravity         {CYAN}│{RESET}");
         println!("  {CYAN}├────────────────────────────────────────┤{RESET}");
         println!("  {CYAN}│{RESET} Coshick (Author) • AvenCores (Upstream){CYAN}│{RESET}");
@@ -49,7 +52,7 @@ pub fn print_banner() {
 
     println!();
     println!("  {CYAN}╔═══════════════════════════════════════════════╗{RESET}");
-    println!("  {CYAN}║{RESET}  {BOLD}{WHITE}Open AG Patcher (Rust Edition){RESET}          {CYAN}v1.4.0 ║{RESET}");
+    println!("  {CYAN}║{RESET}  {BOLD}{WHITE}Open AG Patcher (Rust Edition){RESET}          {CYAN}{ver_label_full}{RESET}");
     println!("  {CYAN}║{RESET}  Region bypass for Antigravity                {CYAN}║{RESET}");
     println!("  {CYAN}║{RESET}  Clean • Ultra-fast • Native binary           {CYAN}║{RESET}");
     println!("  {CYAN}╟───────────────────────────────────────────────╢{RESET}");
@@ -372,7 +375,7 @@ pub fn run_cli() {
             "12" => {
                 println!();
                 println!("  {CYAN}• Program:     Open AG Patcher (Rust Edition){RESET}");
-                println!("  {CYAN}• Version:     1.4.0{RESET}");
+                println!("  {CYAN}• Version:     {CURRENT_VERSION}{RESET}");
                 println!("  {CYAN}• Author:      Coshick{RESET}");
                 println!("  {CYAN}• GitHub:      https://github.com/Milordick/rust-antigravity-patcher{RESET}");
                 println!("  {CYAN}• Upstream:    AvenCores (original Python patcher){RESET}");

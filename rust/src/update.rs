@@ -9,7 +9,7 @@ pub const RELEASES_URL: &str = "https://github.com/Milordick/rust-antigravity-pa
 pub const PROJECT_REPO_URL: &str = "https://github.com/Milordick/rust-antigravity-patcher";
 pub const UPSTREAM_GITLAB: &str = "https://gitlab.com/avencores/open-antigravity-patcher";
 pub const UPSTREAM_SOURCEFORGE: &str = "https://sourceforge.net/projects/open-antigravity-patcher/";
-pub const CURRENT_VERSION: &str = "1.4.0";
+pub const CURRENT_VERSION: &str = "1.4.1";
 
 #[derive(Debug, Clone)]
 pub enum UpdateStatus {
@@ -48,7 +48,7 @@ fn check_github_release() -> UpdateStatus {
         .args([
             "-s",
             "--max-time", "4",
-            "-H", "User-Agent: OpenAGPatcher/1.4.0",
+            "-H", "User-Agent: OpenAGPatcher/1.4.1",
             "-H", "Accept: application/vnd.github.v3+json",
             "https://api.github.com/repos/Milordick/rust-antigravity-patcher/releases/latest",
         ])

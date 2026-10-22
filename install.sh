@@ -397,7 +397,7 @@ verify_installation() {
 run_animated "Проверка запуска и готовности утилиты" verify_installation
 
 # --- Final Success Summary Card ---
-VERSION_INFO="$("${BIN_DIR}/agyptch" --version 2>/dev/null || echo "v1.4.0 (Rust Edition)")"
+VERSION_INFO="$("${BIN_DIR}/agyptch" --version 2>/dev/null || echo "v1.4.1 (Rust Edition)")"
 
 echo ""
 echo -e "${COLOR_GREEN}╭────────────────────────────────────────────────────────────╮${COLOR_RESET}"
