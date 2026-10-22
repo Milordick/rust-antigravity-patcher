@@ -431,24 +431,30 @@ pub fn find_agy_binary() -> Option<PathBuf> {
         .unwrap_or_default();
     let home_path = Path::new(&home);
 
-    let prefix = std::env::var("PREFIX").unwrap_or_default();
-    let prefix_path = Path::new(&prefix);
+    let mut candidates = Vec::new();
 
-    let mut candidates = vec![
-        prefix_path.join("bin/agy"),
-        PathBuf::from("/data/data/com.termux/files/usr/bin/agy"),
-        home_path.join(".local/bin/agy"),
-        home_path.join("bin/agy"),
-        PathBuf::from("/usr/local/bin/agy"),
-        PathBuf::from("/usr/bin/agy"),
-        PathBuf::from("/opt/antigravity/bin/agy"),
-        PathBuf::from("/opt/antigravity/agy"),
-        PathBuf::from("./agy"),
+    if let Ok(prefix) = std::env::var("PREFIX") {
+        if !prefix.is_empty() {
+            candidates.push(Path::new(&prefix).join("bin/agy"));
+        }
+    }
+
+    candidates.push(PathBuf::from("/data/data/com.termux/files/usr/bin/agy"));
+
+    if !home.is_empty() {
+        candidates.push(home_path.join(".local/bin/agy"));
+        candidates.push(home_path.join("bin/agy"));
         #[cfg(target_os = "windows")]
-        home_path.join(".local/bin/agy.exe"),
-        #[cfg(target_os = "windows")]
-        PathBuf::from("./agy.exe"),
-    ];
+        candidates.push(home_path.join(".local/bin/agy.exe"));
+    }
+
+    candidates.push(PathBuf::from("/usr/local/bin/agy"));
+    candidates.push(PathBuf::from("/usr/bin/agy"));
+    candidates.push(PathBuf::from("/opt/antigravity/bin/agy"));
+    candidates.push(PathBuf::from("/opt/antigravity/agy"));
+    candidates.push(PathBuf::from("./agy"));
+    #[cfg(target_os = "windows")]
+    candidates.push(PathBuf::from("./agy.exe"));
 
     #[cfg(target_os = "windows")]
     {
@@ -457,6 +463,11 @@ pub fn find_agy_binary() -> Option<PathBuf> {
             candidates.push(lad.join("Programs/agy/bin/agy.exe"));
             candidates.push(lad.join("Programs/agy/agy.exe"));
             candidates.push(lad.join("agy/bin/agy.exe"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            let pf = Path::new(&prog_files);
+            candidates.push(pf.join("agy/bin/agy.exe"));
+            candidates.push(pf.join("agy/agy.exe"));
         }
     }
 

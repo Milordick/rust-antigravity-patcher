@@ -207,44 +207,83 @@ pub fn find_ide_main_js() -> Option<PathBuf> {
         return Some(local);
     }
 
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let home_path = Path::new(&home);
 
-    let candidates = [
-        // User paths (instant hit)
-        home_path.join(".local/opt/antigravity-ide/resources/app/out/main.js"),
-        home_path.join("Downloads/Antigravity IDE/resources/app/out/main.js"),
-        home_path.join("Загрузки/Antigravity IDE/resources/app/out/main.js"),
-        // System paths
-        PathBuf::from("/opt/antigravity-ide/resources/app/out/main.js"),
-        PathBuf::from("/usr/lib/antigravity-ide/resources/app/out/main.js"),
-        PathBuf::from("/usr/share/antigravity-ide/resources/app/out/main.js"),
-        #[cfg(target_os = "macos")]
-        PathBuf::from("/Applications/Antigravity.app/Contents/Resources/app/out/main.js"),
-    ];
+    let mut candidates = Vec::new();
 
-    for c in &candidates {
-        if c.is_file() {
-            return Some(c.clone());
+    if !home.is_empty() {
+        candidates.push(home_path.join(".local/opt/antigravity-ide/resources/app/out/main.js"));
+        candidates.push(home_path.join(".local/share/antigravity-ide/resources/app/out/main.js"));
+        candidates.push(home_path.join("Downloads/Antigravity IDE/resources/app/out/main.js"));
+        candidates.push(home_path.join("Загрузки/Antigravity IDE/resources/app/out/main.js"));
+        candidates.push(home_path.join("Applications/Antigravity IDE.app/Contents/Resources/app/out/main.js"));
+        candidates.push(home_path.join("Applications/Antigravity.app/Contents/Resources/app/out/main.js"));
+    }
+
+    // System paths
+    candidates.push(PathBuf::from("/opt/antigravity-ide/resources/app/out/main.js"));
+    candidates.push(PathBuf::from("/opt/Antigravity IDE/resources/app/out/main.js"));
+    candidates.push(PathBuf::from("/usr/lib/antigravity-ide/resources/app/out/main.js"));
+    candidates.push(PathBuf::from("/usr/share/antigravity-ide/resources/app/out/main.js"));
+    candidates.push(PathBuf::from("/Applications/Antigravity IDE.app/Contents/Resources/app/out/main.js"));
+    candidates.push(PathBuf::from("/Applications/Antigravity.app/Contents/Resources/app/out/main.js"));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let lad = Path::new(&local_app_data);
+            candidates.push(lad.join("Programs/Antigravity IDE/resources/app/out/main.js"));
+            candidates.push(lad.join("Programs/antigravity-ide/resources/app/out/main.js"));
+            candidates.push(lad.join("Antigravity IDE/resources/app/out/main.js"));
+        }
+        if let Ok(prog_files) = std::env::var("ProgramFiles") {
+            let pf = Path::new(&prog_files);
+            candidates.push(pf.join("Antigravity IDE/resources/app/out/main.js"));
+            candidates.push(pf.join("antigravity-ide/resources/app/out/main.js"));
+        }
+        if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
+            let pf = Path::new(&prog_files_x86);
+            candidates.push(pf.join("Antigravity IDE/resources/app/out/main.js"));
+            candidates.push(pf.join("antigravity-ide/resources/app/out/main.js"));
         }
     }
 
     // Check user-dirs.dirs for custom download dir
-    let user_dirs = home_path.join(".config/user-dirs.dirs");
-    if user_dirs.is_file() {
-        if let Ok(content) = fs::read_to_string(user_dirs) {
-            for line in content.lines() {
-                if line.starts_with("XDG_DOWNLOAD_DIR=") {
-                    let raw = line.trim_start_matches("XDG_DOWNLOAD_DIR=").trim_matches('"');
-                    let expanded = raw.replace("$HOME", &home);
-                    let cand = PathBuf::from(expanded).join("Antigravity IDE/resources/app/out/main.js");
-                    if cand.is_file() {
-                        return Some(cand);
+    if !home.is_empty() {
+        let user_dirs = home_path.join(".config/user-dirs.dirs");
+        if user_dirs.is_file() {
+            if let Ok(content) = fs::read_to_string(user_dirs) {
+                for line in content.lines() {
+                    if line.starts_with("XDG_DOWNLOAD_DIR=") {
+                        let raw = line.trim_start_matches("XDG_DOWNLOAD_DIR=").trim_matches('"');
+                        let expanded = raw.replace("$HOME", &home);
+                        let cand = PathBuf::from(expanded).join("Antigravity IDE/resources/app/out/main.js");
+                        candidates.push(cand);
                     }
                 }
             }
         }
     }
 
-    None
+    // Dedup and sort newest mtime first
+    let mut seen = std::collections::HashSet::new();
+    let mut ranked = Vec::new();
+    for c in candidates {
+        if !c.is_file() {
+            continue;
+        }
+        let key = fs::canonicalize(&c).unwrap_or_else(|_| c.clone());
+        if !seen.insert(key) {
+            continue;
+        }
+        let mtime = c.metadata().ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        ranked.push((mtime, c));
+    }
+    ranked.sort_by(|a, b| b.0.cmp(&a.0));
+    ranked.into_iter().next().map(|(_, p)| p)
 }

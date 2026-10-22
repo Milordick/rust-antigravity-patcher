@@ -156,20 +156,30 @@ pub fn restore_vscode(path: &Path) -> Result<bool, String> {
 }
 
 pub fn find_extension_js() -> Option<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
     let home_path = Path::new(&home);
 
-    let roots = [
-        home_path.join(".vscode/extensions"),
-        home_path.join(".vscode-insiders/extensions"),
-        home_path.join(".vscode-oss/extensions"),
-        home_path.join(".vscode-server/extensions"),
-        home_path.join(".vscode-server-insiders/extensions"),
-    ];
+    let mut roots = Vec::new();
+
+    if let Ok(custom) = std::env::var("VSCODE_EXTENSIONS") {
+        if !custom.is_empty() {
+            roots.push(PathBuf::from(custom));
+        }
+    }
+
+    if !home.is_empty() {
+        roots.push(home_path.join(".vscode/extensions"));
+        roots.push(home_path.join(".vscode-insiders/extensions"));
+        roots.push(home_path.join(".vscode-oss/extensions"));
+        roots.push(home_path.join(".vscode-server/extensions"));
+        roots.push(home_path.join(".vscode-server-insiders/extensions"));
+    }
 
     let prefix = "google.google-antigravity-";
     let mut best_path = None;
-    let mut best_mtime = 0;
+    let mut best_mtime = std::time::SystemTime::UNIX_EPOCH;
 
     for root in &roots {
         if let Ok(entries) = fs::read_dir(root) {
@@ -179,10 +189,9 @@ pub fn find_extension_js() -> Option<PathBuf> {
                 if name_str.starts_with(prefix) && entry.path().is_dir() {
                     let js_cand = entry.path().join("extension.js");
                     if js_cand.is_file() {
-                        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok())
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
+                        let mtime = entry.metadata().ok()
+                            .and_then(|m| m.modified().ok())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                         if mtime >= best_mtime {
                             best_mtime = mtime;
                             best_path = Some(js_cand);
