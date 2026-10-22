@@ -26,8 +26,24 @@ fn main() {
         println!("  --check           Inspect and print status of all targets");
         println!("  --patch-all       Apply patches to all detected targets (headless)");
         println!("  --restore-all     Restore all detected targets from backups (headless)");
+        println!("  --update          Self-update to the latest release directly from GitHub");
         println!("  --version, -v     Print version information");
         println!("  --help, -h        Print this help message");
+        return;
+    }
+
+    if args.iter().any(|a| a == "--update") {
+        println!("Проверка и автоматическое обновление Open AG Patcher...");
+        match open_ag_patcher::update::perform_self_update(None) {
+            Ok(msg) => {
+                println!("\x1b[32m[+] {}\x1b[0m", msg);
+                println!("Перезапустите agyptch для использования новой версии.");
+            }
+            Err(e) => {
+                eprintln!("\x1b[31m[!] {}\x1b[0m", e);
+                std::process::exit(1);
+            }
+        }
         return;
     }
 

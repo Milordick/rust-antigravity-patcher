@@ -205,7 +205,7 @@ pub fn run_cli() {
         print_row("8", "Antigravity VS Code extension", "from backup", YELLOW);
 
         print_section("TOOLS");
-        print_row("9", "Check for updates", "check GitHub releases", CYAN);
+        print_row("9", "Check and install update", "auto-update from GitHub", CYAN);
         print_row("10", "Open GitHub repository", "source & updates", CYAN);
         print_row("11", "Select custom path", "override auto-detected target", CYAN);
         print_row("12", "About program", "information & author links", CYAN);
@@ -370,6 +370,19 @@ pub fn run_cli() {
                         Err(e) => println!("\n  {RED}[!] Error restoring VS Code extension: {e}{RESET}"),
                     }
                 }
+                pause();
+            }
+            "9" => {
+                println!("\n  [*] Checking and downloading latest release from GitHub...");
+                match crate::update::perform_self_update(None) {
+                    Ok(msg) => println!("  {GREEN}[+] {msg}{RESET}"),
+                    Err(e) => println!("  {RED}[!] {e}{RESET}"),
+                }
+                pause();
+            }
+            "10" => {
+                crate::update::open_in_browser(crate::update::RELEASES_URL);
+                println!("\n  {GREEN}[+] Opening releases page in browser...{RESET}");
                 pause();
             }
             "12" => {

@@ -41,9 +41,9 @@ use crate::targets::vscode::{
 };
 use crate::ui::theme::*;
 use crate::update::{
-    get_update_status, open_in_browser, start_background_update_check, UpdateStatus,
-    CURRENT_VERSION, GITHUB_REPO, PROJECT_REPO_URL, RELEASES_URL, UPSTREAM_GITLAB,
-    UPSTREAM_SOURCEFORGE,
+    get_self_update_state, get_update_status, open_in_browser, start_background_update_check,
+    start_self_update, SelfUpdateState, UpdateStatus, CURRENT_VERSION, GITHUB_REPO,
+    PROJECT_REPO_URL, RELEASES_URL, UPSTREAM_GITLAB, UPSTREAM_SOURCEFORGE,
 };
 
 pub const AUTHOR_NAME: &str = "Coshick";
@@ -163,6 +163,7 @@ pub enum AppAction {
     ResetPath(usize),
     AutoDetectPaths,
     ClearLogs,
+    ApplySelfUpdate,
     OpenRelease,
     CheckUpdates,
     OpenProjectRepo,
@@ -618,6 +619,14 @@ impl AppState {
                 self.logs.clear();
                 self.log(LogLevel::Info, "Журнал событий очищен.");
             }
+            AppAction::ApplySelfUpdate => {
+                let target_tag = match get_update_status() {
+                    UpdateStatus::Available(tag, _) => Some(tag),
+                    _ => None,
+                };
+                start_self_update(target_tag);
+                self.log(LogLevel::Info, "Запущено автоматическое скачивание и установка обновления...");
+            }
             AppAction::OpenRelease => open_in_browser(RELEASES_URL),
             AppAction::CheckUpdates => {
                 start_background_update_check();
@@ -882,7 +891,11 @@ pub fn handle_key_input(code: KeyCode, state: &mut AppState) -> bool {
             return false;
         }
         KeyCode::Char('u') | KeyCode::Char('U') => {
-            state.execute_action(AppAction::SelectTab(3));
+            if state.current_tab == Tab::Updates {
+                state.execute_action(AppAction::ApplySelfUpdate);
+            } else {
+                state.execute_action(AppAction::SelectTab(3));
+            }
             return false;
         }
         KeyCode::Char('m') | KeyCode::Char('M') | KeyCode::Char('?') | KeyCode::Char('h') => {
@@ -969,7 +982,10 @@ pub fn handle_key_input(code: KeyCode, state: &mut AppState) -> bool {
                 },
                 Tab::Updates => {
                     if code == KeyCode::Enter {
-                        state.execute_action(AppAction::OpenRelease);
+                        match get_update_status() {
+                            UpdateStatus::Available(..) => state.execute_action(AppAction::ApplySelfUpdate),
+                            _ => state.execute_action(AppAction::OpenRelease),
+                        }
                     }
                 }
                 Tab::About => {
@@ -1015,7 +1031,7 @@ fn get_button_count_for_tab(tab: Tab) -> usize {
         Tab::Targets => 3,
         Tab::Paths => 3,
         Tab::Logs => 2,
-        Tab::Updates => 2,
+        Tab::Updates => 3,
         Tab::About => 3,
     }
 }
@@ -1040,8 +1056,9 @@ fn execute_focused_button(state: &mut AppState, btn_idx: usize) {
             _ => {}
         },
         Tab::Updates => match btn_idx {
-            0 => state.execute_action(AppAction::OpenRelease),
-            1 => state.execute_action(AppAction::CheckUpdates),
+            0 => state.execute_action(AppAction::ApplySelfUpdate),
+            1 => state.execute_action(AppAction::OpenRelease),
+            2 => state.execute_action(AppAction::CheckUpdates),
             _ => {}
         },
         Tab::About => match btn_idx {
@@ -1254,23 +1271,26 @@ fn draw_tabs_bar(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             action: AppAction::SelectTab(i),
         });
 
+        let has_update = t == Tab::Updates && matches!(get_update_status(), UpdateStatus::Available(..));
+        let badge = if has_update { " ⚡" } else { "" };
+
         let label = if inner.width < 45 {
             if is_active {
-                format!("[{}]", t.tiny_name())
+                format!("[{}]{}", t.tiny_name(), badge)
             } else {
-                format!(" {} ", t.tiny_name())
+                format!(" {}{}", t.tiny_name(), badge)
             }
         } else if inner.width < 75 {
             if is_active {
-                format!("●{}", t.short_name())
+                format!("●{}{}", t.short_name(), badge)
             } else {
-                format!(" {}", t.short_name())
+                format!(" {}{}", t.short_name(), badge)
             }
         } else {
             if is_active {
-                format!("● {}", t.name())
+                format!("● {}{}", t.name(), badge)
             } else {
-                format!("  {}", t.name())
+                format!("  {}{}", t.name(), badge)
             }
         };
 
@@ -1295,16 +1315,39 @@ fn draw_tab_targets(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         return;
     }
 
-    if area.width < 80 {
+    let update_info = match get_update_status() {
+        UpdateStatus::Available(tag, url) => Some((tag, url)),
+        _ => None,
+    };
+
+    let (banner_area, content_area) = if let Some(_) = update_info {
+        let banner_h = if area.height < 18 { 1 } else { 3 };
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(banner_h),
+                Constraint::Min(4),
+            ])
+            .split(area);
+        (Some(chunks[0]), chunks[1])
+    } else {
+        (None, area)
+    };
+
+    if let (Some(b_rect), Some((ref tag, _))) = (banner_area, update_info) {
+        draw_main_update_banner(f, b_rect, tag, state);
+    }
+
+    if content_area.width < 80 {
         // Vertical layout for narrow terminals / mobile / Termux
-        let list_h = if area.height < 18 { 6 } else { 7 };
+        let list_h = if content_area.height < 18 { 6 } else { 7 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(list_h),
                 Constraint::Min(6),
             ])
-            .split(area);
+            .split(content_area);
 
         draw_targets_list(f, chunks[0], state);
         draw_target_telemetry_card(f, chunks[1], state);
@@ -1316,10 +1359,53 @@ fn draw_tab_targets(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
                 Constraint::Percentage(45),
                 Constraint::Percentage(55),
             ])
-            .split(area);
+            .split(content_area);
 
         draw_targets_list(f, cols[0], state);
         draw_target_telemetry_card(f, cols[1], state);
+    }
+}
+
+fn draw_main_update_banner(f: &mut ratatui::Frame, area: Rect, tag: &str, state: &mut AppState) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    state.clickables.push(ClickableArea {
+        rect: area,
+        action: AppAction::SelectTab(3),
+    });
+
+    if area.height < 3 {
+        let line = Line::from(vec![
+            Span::styled(" 🚀 Доступно обновление: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{tag} "), Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("• Нажмите ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled("[4]", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" или кликните для перехода в Обновления ➔", Style::default().fg(MD_TEXT_LOW)),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    } else {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BORDER_ROUNDED)
+            .border_style(Style::default().fg(MD_SUCCESS))
+            .title(Span::styled(" ⚡ Доступно обновление ПО ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)));
+
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let line = Line::from(vec![
+            Span::styled("  🚀 Вышла новая версия ", Style::default().fg(MD_TEXT_HIGH)),
+            Span::styled(tag, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled("!  ", Style::default().fg(MD_TEXT_HIGH)),
+            Span::styled("Нажмите клавишу ", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled("[4]", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(" или кликните здесь для автоматической установки", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(" ➔", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+        ]);
+
+        f.render_widget(Paragraph::new(line).alignment(Alignment::Left), inner);
     }
 }
 
@@ -1949,7 +2035,7 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         }
         UpdateStatus::Available(tag, url) => {
             lines.push(Line::from(vec![
-                Span::styled("● Новая версия: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled("● Новая версия доступна: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::styled(tag, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
             ]));
             lines.push(Line::from(vec![
@@ -1965,6 +2051,33 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         }
     }
 
+    let self_upd = get_self_update_state();
+    match self_upd {
+        SelfUpdateState::InProgress(ref msg) => {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::styled(format!("{} ", get_spinner_char(state.tick)), Style::default().fg(MD_WARNING)),
+                Span::styled(msg, Style::default().fg(MD_WARNING).add_modifier(Modifier::BOLD)),
+            ]));
+        }
+        SelfUpdateState::Success(ref msg) => {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::styled("✓ ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled(msg, Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            ]));
+            lines.push(Line::from(Span::styled("Перезапустите команду agyptch для запуска обновленной версии.", Style::default().fg(MD_TEXT_LOW))));
+        }
+        SelfUpdateState::Failed(ref err) => {
+            lines.push(Line::raw(""));
+            lines.push(Line::from(vec![
+                Span::styled("❌ ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled(err, Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+            ]));
+        }
+        SelfUpdateState::Idle => {}
+    }
+
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), chunks[0]);
 
     // Buttons
@@ -1976,19 +2089,28 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
     let btn_row = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
+            Constraint::Percentage(34),
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
         ])
         .split(chunks[1]);
 
-    let (b_releases, b_check) = if inner.width < 55 {
-        ("Релизы (↵)", "Проверить (R)")
-    } else {
-        ("Открыть страницу релизов (Enter)", "Проверить снова (R)")
+    let (b_update, b_releases, b_check) = match self_upd {
+        SelfUpdateState::InProgress(_) => {
+            ("⏳ Скачивание...", "Релизы (↵)", "Проверить (R)")
+        }
+        _ => {
+            if inner.width < 60 {
+                ("⚡ Обновить (U)", "Релизы (↵)", "Проверить (R)")
+            } else {
+                ("⚡ Обновить утилиту (U)", "Открыть релизы (↵)", "Проверить (R)")
+            }
+        }
     };
 
-    render_button(f, btn_row[0], b_releases, focused_btn == Some(0), AppAction::OpenRelease, state);
-    render_button(f, btn_row[1], b_check, focused_btn == Some(1), AppAction::CheckUpdates, state);
+    render_button(f, btn_row[0], b_update, focused_btn == Some(0), AppAction::ApplySelfUpdate, state);
+    render_button(f, btn_row[1], b_releases, focused_btn == Some(1), AppAction::OpenRelease, state);
+    render_button(f, btn_row[2], b_check, focused_btn == Some(2), AppAction::CheckUpdates, state);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
