@@ -236,7 +236,7 @@ pub fn run_cli() {
                             let after = file_sha256(p);
                             println!("\n  {GREEN}[+] Antigravity IDE successfully patched!{RESET}");
                             if let (Some(b), Some(a)) = (before, after) {
-                                println!("      SHA-256: {CYAN}{} ➔ {}{RESET}", format_short_hash(&b), format_short_hash(&a));
+                                println!("      SHA-256: {CYAN}{} -> {}{RESET}", format_short_hash(&b), format_short_hash(&a));
                             }
                         }
                         Ok(false) => println!("\n  {YELLOW}[*] Antigravity IDE is already patched.{RESET}"),
@@ -255,7 +255,7 @@ pub fn run_cli() {
                             let after = file_sha256(p);
                             println!("\n  {GREEN}[+] Antigravity 2.0 successfully patched!{RESET}");
                             if let (Some(b), Some(a)) = (before, after) {
-                                println!("      SHA-256: {CYAN}{} ➔ {}{RESET}", format_short_hash(&b), format_short_hash(&a));
+                                println!("      SHA-256: {CYAN}{} -> {}{RESET}", format_short_hash(&b), format_short_hash(&a));
                             }
                         }
                         Ok(false) => println!("\n  {YELLOW}[*] Antigravity 2.0 is already patched.{RESET}"),
@@ -274,7 +274,7 @@ pub fn run_cli() {
                             let after = file_sha256(p);
                             println!("\n  {GREEN}[+] Antigravity CLI successfully patched!{RESET}");
                             if let (Some(b), Some(a)) = (before, after) {
-                                println!("      SHA-256: {CYAN}{} ➔ {}{RESET}", format_short_hash(&b), format_short_hash(&a));
+                                println!("      SHA-256: {CYAN}{} -> {}{RESET}", format_short_hash(&b), format_short_hash(&a));
                             }
                         }
                         Ok(false) => println!("\n  {YELLOW}[*] Antigravity CLI is already patched.{RESET}"),
@@ -293,7 +293,7 @@ pub fn run_cli() {
                             let after = file_sha256(p);
                             println!("\n  {GREEN}[+] VS Code extension successfully patched!{RESET}");
                             if let (Some(b), Some(a)) = (before, after) {
-                                println!("      SHA-256: {CYAN}{} ➔ {}{RESET}", format_short_hash(&b), format_short_hash(&a));
+                                println!("      SHA-256: {CYAN}{} -> {}{RESET}", format_short_hash(&b), format_short_hash(&a));
                             }
                         }
                         Ok(false) => println!("\n  {YELLOW}[*] VS Code extension is already patched.{RESET}"),
@@ -307,7 +307,7 @@ pub fn run_cli() {
                             let after = file_sha256(p);
                             println!("  {GREEN}[+] VS Code agy binary successfully patched!{RESET}");
                             if let (Some(b), Some(a)) = (before, after) {
-                                println!("      SHA-256: {CYAN}{} ➔ {}{RESET}", format_short_hash(&b), format_short_hash(&a));
+                                println!("      SHA-256: {CYAN}{} -> {}{RESET}", format_short_hash(&b), format_short_hash(&a));
                             }
                         }
                         Ok(false) => println!("  {YELLOW}[*] VS Code agy binary is already patched.{RESET}"),

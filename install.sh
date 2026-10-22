@@ -65,11 +65,11 @@ run_animated() {
     local exit_code=$?
 
     if [ $exit_code -eq 0 ]; then
-        printf "\r  ${COLOR_GREEN}✓${COLOR_RESET}  ${COLOR_BOLD}%-48s${COLOR_RESET} ${COLOR_GRAY}[Готово]${COLOR_RESET}\n" "$label"
+        printf "\r  ${COLOR_GREEN}[+]${COLOR_RESET} ${COLOR_BOLD}%-48s${COLOR_RESET} ${COLOR_GRAY}[Готово]${COLOR_RESET}\n" "$label"
         rm -f "$pid_file" "$err_file"
         return 0
     else
-        printf "\r  ${COLOR_RED}✗${COLOR_RESET}  ${COLOR_BOLD}%-48s${COLOR_RESET} ${COLOR_RED}[Ошибка]${COLOR_RESET}\n" "$label"
+        printf "\r  ${COLOR_RED}[-]${COLOR_RESET} ${COLOR_BOLD}%-48s${COLOR_RESET} ${COLOR_RED}[Ошибка]${COLOR_RESET}\n" "$label"
         if [ -s "$err_file" ]; then
             printf "${COLOR_DIM}%s${COLOR_RESET}\n" "$(cat "$err_file")"
         fi
@@ -103,7 +103,7 @@ case "$ARCH_TYPE" in
 esac
 
 if [ "$PLATFORM" = "unknown" ] || [ "$ARCH" = "unknown" ]; then
-    echo -e "  ${COLOR_RED}✗${COLOR_RESET} Неподдерживаемая архитектура: ${OS_TYPE} / ${ARCH_TYPE}"
+    echo -e "  ${COLOR_RED}[-]${COLOR_RESET} Неподдерживаемая архитектура: ${OS_TYPE} / ${ARCH_TYPE}"
     exit 1
 fi
 
@@ -136,11 +136,11 @@ if [ "$PLATFORM" = "linux" ] && [ "$IS_TERMUX" -eq 0 ]; then
 fi
 
 if [ "$IS_TERMUX" -eq 1 ]; then
-    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}Android / Termux${COLOR_RESET} (${ARCH})"
+    echo -e "  ${COLOR_GREEN}[+]${COLOR_RESET} Система определена: ${COLOR_BOLD}Android / Termux${COLOR_RESET} (${ARCH})"
 elif [ "$IS_ATOMIC" -eq 1 ] && [ -n "$ATOMIC_NAME" ]; then
-    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH}) [Атомарный дистрибутив: ${ATOMIC_NAME}]"
+    echo -e "  ${COLOR_GREEN}[+]${COLOR_RESET} Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH}) [Атомарный дистрибутив: ${ATOMIC_NAME}]"
 else
-    echo -e "  ${COLOR_GREEN}✓${COLOR_RESET}  Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH})"
+    echo -e "  ${COLOR_GREEN}[+]${COLOR_RESET} Система определена: ${COLOR_BOLD}${PLATFORM}${COLOR_RESET} (${ARCH})"
 fi
 
 # --- Step 2: Determine Target Paths ---
@@ -230,35 +230,57 @@ prepare_binary() {
     local tmp_checksums
     tmp_checksums="$(mktemp)"
 
-    local download_ok=0
-    if command -v curl >/dev/null 2>&1; then
-        if curl -fsSL "$download_url" -o "$tmp_download"; then
-            download_ok=1
-        elif [ "$PLATFORM" = "android" ]; then
-            # Fallback to linux-arm64 if android-arm64 is not yet cached or found
-            target_asset="agyptch-linux-${ARCH}"
-            download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
-            if curl -fsSL "$download_url" -o "$tmp_download"; then
-                download_ok=1
+    # Fast resilient download function: IPv4 preference, connection timeouts, retries & CDN fallback
+    download_asset() {
+        local src_url="$1"
+        local out_file="$2"
+
+        if command -v curl >/dev/null 2>&1; then
+            # 1. Fast direct IPv4 connection with timeout and retries (avoids slow IPv6 DNS fallback)
+            if curl -4 -fsSL --connect-timeout 10 --retry 2 --retry-delay 1 --speed-limit 1024 --speed-time 15 "$src_url" -o "$out_file" 2>/dev/null; then
+                return 0
+            fi
+            # 2. Standard curl (IPv4/IPv6 dual-stack)
+            if curl -fsSL --connect-timeout 15 --retry 2 --retry-delay 1 "$src_url" -o "$out_file" 2>/dev/null; then
+                return 0
+            fi
+            # 3. Mirror proxy fallback (in case GitHub CDN / S3 is throttled or blocked by ISP)
+            local mirror_url="https://mirror.ghproxy.com/${src_url}"
+            if curl -fsSL --connect-timeout 15 --retry 2 "$mirror_url" -o "$out_file" 2>/dev/null; then
+                return 0
             fi
         fi
-        curl -fsSL "$checksums_url" -o "$tmp_checksums" 2>/dev/null || true
-    elif command -v wget >/dev/null 2>&1; then
-        if wget -qO "$tmp_download" "$download_url"; then
-            download_ok=1
-        elif [ "$PLATFORM" = "android" ]; then
-            target_asset="agyptch-linux-${ARCH}"
-            download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
-            if wget -qO "$tmp_download" "$download_url"; then
-                download_ok=1
+
+        if command -v wget >/dev/null 2>&1; then
+            if wget -4 -q --timeout=15 --tries=2 -O "$out_file" "$src_url" 2>/dev/null; then
+                return 0
+            fi
+            if wget -q --timeout=15 --tries=2 -O "$out_file" "$src_url" 2>/dev/null; then
+                return 0
+            fi
+            local mirror_url="https://mirror.ghproxy.com/${src_url}"
+            if wget -q --timeout=15 --tries=2 -O "$out_file" "$mirror_url" 2>/dev/null; then
+                return 0
             fi
         fi
-        wget -qO "$tmp_checksums" "$checksums_url" 2>/dev/null || true
-    else
-        rm -f "$tmp_download" "$tmp_checksums"
-        echo "Требуется curl или wget для загрузки бинарника." >&2
+
         return 1
+    }
+
+    local download_ok=0
+    if download_asset "$download_url" "$tmp_download"; then
+        download_ok=1
+    elif [ "$PLATFORM" = "android" ]; then
+        # Fallback to linux-arm64 if android-arm64 is not found
+        target_asset="agyptch-linux-${ARCH}"
+        download_url="https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/${target_asset}"
+        if download_asset "$download_url" "$tmp_download"; then
+            download_ok=1
+        fi
     fi
+
+    # Best-effort checksums download
+    download_asset "$checksums_url" "$tmp_checksums" >/dev/null 2>&1 || true
 
     if [ $download_ok -ne 1 ] || [ ! -s "$tmp_download" ]; then
         rm -f "$tmp_download" "$tmp_checksums"

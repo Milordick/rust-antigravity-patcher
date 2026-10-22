@@ -224,7 +224,7 @@ cargo build --release
 
 ---
 
-## 💖 Поддержка автора
+## Поддержка автора
 
 Если проект оказался для вас полезным, сэкономил время и помог комфортно работать с Antigravity на ПК или в Termux на телефоне, вы можете поддержать автора и дальнейшее развитие проекта:
 
@@ -234,7 +234,7 @@ cargo build --release
   </a>
 </p>
 
-👉 **Прямая ссылка:** [pay.cloudtips.ru/p/0ef570e5](https://pay.cloudtips.ru/p/0ef570e5)
+**Прямая ссылка:** [pay.cloudtips.ru/p/0ef570e5](https://pay.cloudtips.ru/p/0ef570e5)
 
 ---
 

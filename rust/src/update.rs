@@ -158,7 +158,8 @@ pub fn perform_self_update(target_tag: Option<&str>) -> Result<String, String> {
 
     let output = std::process::Command::new("curl")
         .args([
-            "-f", "-L",
+            "-4", "-f", "-L",
+            "--connect-timeout", "15",
             "--max-time", "90",
             "-H", &format!("User-Agent: OpenAGPatcher/{}", CURRENT_VERSION),
             "-o", tmp_path.to_str().ok_or_else(|| "Некорректный путь к временному файлу".to_string())?,

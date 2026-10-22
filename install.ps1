@@ -7,6 +7,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 
 # --- Terminal Styling (Material Dark Colors & VT100 Emulation) ---
 try {
@@ -39,9 +40,9 @@ function Write-StepAnimated {
 
     try {
         & $Action
-        Write-Host "`r  $ColorGreen✓$ColorReset  $ColorBold$($Label.PadRight(48))$ColorReset $ColorGray[Готово]$ColorReset"
+        Write-Host "`r  $ColorGreen[+]$ColorReset $ColorBold$($Label.PadRight(48))$ColorReset $ColorGray[Готово]$ColorReset"
     } catch {
-        Write-Host "`r  $ColorRed✗$ColorReset  $ColorBold$($Label.PadRight(48))$ColorReset $ColorRed[Ошибка]$ColorReset"
+        Write-Host "`r  $ColorRed[-]$ColorReset $ColorBold$($Label.PadRight(48))$ColorReset $ColorRed[Ошибка]$ColorReset"
         Write-Host "$ColorDim$_$ColorReset"
         throw $_
     }
@@ -64,7 +65,7 @@ if ($rawArch -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
 } elseif (-not $is64Bit) {
     $arch = "x86"
 }
-Write-Host "  $ColorGreen✓$ColorReset  Система определена: $ColorBold Windows$ColorReset ($arch)"
+Write-Host "  $ColorGreen[+]$ColorReset Система определена: $ColorBold Windows$ColorReset ($arch)"
 
 # --- Step 2: Target Directory Setup ---
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\open-ag-patcher"
@@ -133,11 +134,16 @@ Write-StepAnimated "Установка исполняемого файла в $i
     $usedUrl = $downloadUrl
 
     try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempExe -UseBasicParsing
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $tempExe -UseBasicParsing -TimeoutSec 30
     } catch {
-        # Fallback to x86_64 (Windows on ARM runs x64 via built-in Prism emulator)
-        $usedUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
-        Invoke-WebRequest -Uri $usedUrl -OutFile $tempExe -UseBasicParsing
+        # Try proxy mirror or fallback to x86_64
+        $mirrorUrl = "https://mirror.ghproxy.com/$downloadUrl"
+        try {
+            Invoke-WebRequest -Uri $mirrorUrl -OutFile $tempExe -UseBasicParsing -TimeoutSec 30
+        } catch {
+            $usedUrl = "https://github.com/Milordick/rust-antigravity-patcher/releases/latest/download/agyptch-windows-x86_64.exe"
+            Invoke-WebRequest -Uri $usedUrl -OutFile $tempExe -UseBasicParsing -TimeoutSec 30
+        }
     }
 
     # Verify SHA-256 checksum if checksums.txt is available

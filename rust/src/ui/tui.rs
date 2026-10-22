@@ -473,7 +473,7 @@ impl AppState {
                     if let (Some(b), Some(a)) = (hash_before, hash_after) {
                         self.log(LogLevel::Info, format!("  SHA-256 (до):    {}", b));
                         self.log(LogLevel::Info, format!("  SHA-256 (после): {}", a));
-                        self.log(LogLevel::Info, format!("  Контрольная сумма: {} ➔ {}", short_b, short_a));
+                        self.log(LogLevel::Info, format!("  Контрольная сумма: {} -> {}", short_b, short_a));
                     }
                 }
                 Ok(false) => {
@@ -514,7 +514,7 @@ impl AppState {
                         self.log(LogLevel::Info, format!("  SHA-256 (оригинал): {}", a));
                     }
                     if let (Some(ref b), Some(_)) = (hash_before, hash_after) {
-                        self.log(LogLevel::Info, format!("  Контрольная сумма: {} ➔ {}", format_short_hash(b), short_a));
+                        self.log(LogLevel::Info, format!("  Контрольная сумма: {} -> {}", format_short_hash(b), short_a));
                     }
                 }
                 Ok(false) => {
@@ -550,7 +550,7 @@ impl AppState {
                     let short_a = hash_after.as_deref().map(format_short_hash).unwrap_or_else(|| "—".into());
                     self.log(
                         LogLevel::Success,
-                        format!("  [+] {} пропатчен (SHA-256: {} ➔ {})", t.name, short_b, short_a),
+                        format!("  [+] {} пропатчен (SHA-256: {} -> {})", t.name, short_b, short_a),
                     );
                 }
             }
@@ -1272,7 +1272,7 @@ fn draw_tabs_bar(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         });
 
         let has_update = t == Tab::Updates && matches!(get_update_status(), UpdateStatus::Available(..));
-        let badge = if has_update { " ⚡" } else { "" };
+        let badge = if has_update { " [!]" } else { "" };
 
         let label = if inner.width < 45 {
             if is_active {
@@ -1378,11 +1378,11 @@ fn draw_main_update_banner(f: &mut ratatui::Frame, area: Rect, tag: &str, state:
 
     if area.height < 3 {
         let line = Line::from(vec![
-            Span::styled(" 🚀 Доступно обновление: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(" [!] Доступно обновление: ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
             Span::styled(format!("{tag} "), Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled("• Нажмите ", Style::default().fg(MD_TEXT_LOW)),
             Span::styled("[4]", Style::default().fg(MD_SECONDARY).add_modifier(Modifier::BOLD)),
-            Span::styled(" или кликните для перехода в Обновления ➔", Style::default().fg(MD_TEXT_LOW)),
+            Span::styled(" или кликните для перехода в Обновления ->", Style::default().fg(MD_TEXT_LOW)),
         ]);
         f.render_widget(Paragraph::new(line), area);
     } else {
@@ -1390,19 +1390,19 @@ fn draw_main_update_banner(f: &mut ratatui::Frame, area: Rect, tag: &str, state:
             .borders(Borders::ALL)
             .border_type(BORDER_ROUNDED)
             .border_style(Style::default().fg(MD_SUCCESS))
-            .title(Span::styled(" ⚡ Доступно обновление ПО ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)));
+            .title(Span::styled(" [!] Доступно обновление ПО ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)));
 
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let line = Line::from(vec![
-            Span::styled("  🚀 Вышла новая версия ", Style::default().fg(MD_TEXT_HIGH)),
+            Span::styled("  [!] Вышла новая версия ", Style::default().fg(MD_TEXT_HIGH)),
             Span::styled(tag, Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::styled("!  ", Style::default().fg(MD_TEXT_HIGH)),
             Span::styled("Нажмите клавишу ", Style::default().fg(MD_TEXT_LOW)),
             Span::styled("[4]", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
             Span::styled(" или кликните здесь для автоматической установки", Style::default().fg(MD_TEXT_LOW)),
-            Span::styled(" ➔", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(" ->", Style::default().fg(MD_PRIMARY).add_modifier(Modifier::BOLD)),
         ]);
 
         f.render_widget(Paragraph::new(line).alignment(Alignment::Left), inner);
@@ -1925,7 +1925,7 @@ fn draw_tab_logs(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
             .map(|l| {
                 let (badge, style) = match l.level {
                     LogLevel::Info => if inner.width < 50 { ("[i]", Style::default().fg(MD_PRIMARY)) } else { ("[ ИНФО  ]", Style::default().fg(MD_PRIMARY)) },
-                    LogLevel::Success => if inner.width < 50 { ("[✓]", style_patched()) } else { ("[ УСПЕХ ]", style_patched()) },
+                    LogLevel::Success => if inner.width < 50 { ("[+]", style_patched()) } else { ("[ УСПЕХ ]", style_patched()) },
                     LogLevel::Warn => if inner.width < 50 { ("[?]", style_unpatched()) } else { ("[ ВНИМ  ]", style_unpatched()) },
                     LogLevel::Error => if inner.width < 50 { ("[x]", Style::default().fg(MD_ERROR)) } else { ("[ ОШИБК ]", Style::default().fg(MD_ERROR)) },
                 };
@@ -2063,7 +2063,7 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         SelfUpdateState::Success(ref msg) => {
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
-                Span::styled("✓ ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled("[+] ", Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::styled(msg, Style::default().fg(MD_SUCCESS).add_modifier(Modifier::BOLD)),
             ]));
             lines.push(Line::from(Span::styled("Перезапустите команду agyptch для запуска обновленной версии.", Style::default().fg(MD_TEXT_LOW))));
@@ -2071,7 +2071,7 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
         SelfUpdateState::Failed(ref err) => {
             lines.push(Line::raw(""));
             lines.push(Line::from(vec![
-                Span::styled("❌ ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled("[-] ", Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
                 Span::styled(err, Style::default().fg(MD_ERROR).add_modifier(Modifier::BOLD)),
             ]));
         }
@@ -2097,13 +2097,13 @@ fn draw_tab_updates(f: &mut ratatui::Frame, area: Rect, state: &mut AppState) {
 
     let (b_update, b_releases, b_check) = match self_upd {
         SelfUpdateState::InProgress(_) => {
-            ("⏳ Скачивание...", "Релизы (↵)", "Проверить (R)")
+            ("[*] Скачивание...", "Релизы (Enter)", "Проверить (R)")
         }
         _ => {
             if inner.width < 60 {
-                ("⚡ Обновить (U)", "Релизы (↵)", "Проверить (R)")
+                ("Обновить (U)", "Релизы (Enter)", "Проверить (R)")
             } else {
-                ("⚡ Обновить утилиту (U)", "Открыть релизы (↵)", "Проверить (R)")
+                ("Обновить утилиту (U)", "Открыть релизы (Enter)", "Проверить (R)")
             }
         }
     };
