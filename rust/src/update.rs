@@ -1,6 +1,7 @@
 //! Background update checking, release browser launcher, and atomic self-updater.
 
 use std::fs;
+#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;

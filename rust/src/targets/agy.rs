@@ -16,6 +16,8 @@ use crate::core::backup::{make_backup, restore_backup};
 use crate::core::cache::{drop_cached, get_cached, put_cached};
 
 pub const BAK_EXT: &str = ".agybak";
+pub const UPDATER_URL: &[u8] = b"https://antigravity-cli-auto-updater-974169037036.us-central1.run.app";
+pub const DISABLED_URL: &[u8] = b"http://127.0.0.1:9999/disabled-auto-updater-server-url-disabled-block";
 
 pub struct AgyGates {
     pub cli_gate: MultiGate,
@@ -321,8 +323,8 @@ pub fn check_agy_status(path: &Path) -> AgyStatus {
             }
         };
 
-        let g1 = gates.cli_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
-        let g2 = gates.auth_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _)| s == GateStatus::Patched).unwrap_or(false);
+        let g1 = gates.cli_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _, _)| s == GateStatus::Patched).unwrap_or(false);
+        let g2 = gates.auth_gate.resolve(&mmap, Some(arch), bounds).map(|(s, _, _, _)| s == GateStatus::Patched).unwrap_or(true);
         let g3 = if arch == Arch::X64 {
             gates.print_gate.find(&mmap, Some(arch), Some(1), bounds).map(|(s, _)| s == GateStatus::Patched).unwrap_or(false)
         } else {
@@ -366,24 +368,17 @@ pub fn apply_agy_patch(path: &Path) -> Result<bool, String> {
         let gates = AgyGates::new().map_err(|e| e.to_string())?;
 
         let mut patches = Vec::new();
-        // 1. Gate 1
-        let (s1, off1, _) = gates.cli_gate.resolve(&mmap, Some(arch), bounds)?;
+        // 1. Gate 1 (CLI eligibility gate)
+        let (s1, off1, _, fix1) = gates.cli_gate.resolve(&mmap, Some(arch), bounds)?;
         if s1 != GateStatus::Patched {
-            let fix: &[u8] = match arch {
-                Arch::Arm64 => b"\x21\x00\x80\x52",
-                _ => b"\x48\x85\xc0\x90",
-            };
-            patches.push((off1, fix.to_vec()));
+            patches.push((off1, fix1.to_vec()));
         }
 
-        // 2. Gate 2
-        let (s2, off2, _) = gates.auth_gate.resolve(&mmap, Some(arch), bounds)?;
-        if s2 != GateStatus::Patched {
-            let fix: &[u8] = match arch {
-                Arch::Arm64 => b"\x23\x00\x80\x52\x03\x20\x00\x39",
-                _ => b"\xc6\x40\x08\x01\x90\x90",
-            };
-            patches.push((off2, fix.to_vec()));
+        // 2. Gate 2 (Auth gate)
+        if let Ok((s2, off2, _, fix2)) = gates.auth_gate.resolve(&mmap, Some(arch), bounds) {
+            if s2 != GateStatus::Patched {
+                patches.push((off2, fix2.to_vec()));
+            }
         }
 
         // 3. Gate 3 (x64)
@@ -396,6 +391,22 @@ pub fn apply_agy_patch(path: &Path) -> Result<bool, String> {
                 }
             }
         }
+
+        // 4. Mobile Update Lock integration
+        let lock_active = std::fs::read_to_string("/workspace/.update_lock")
+            .map(|s| s.trim() != "false")
+            .unwrap_or(false);
+
+        if lock_active {
+            if let Some(off) = memchr::memmem::find(&mmap, UPDATER_URL) {
+                patches.push((off, DISABLED_URL.to_vec()));
+            }
+        } else if Path::new("/workspace/.update_lock").exists() {
+            if let Some(off) = memchr::memmem::find(&mmap, DISABLED_URL) {
+                patches.push((off, UPDATER_URL.to_vec()));
+            }
+        }
+
         patches
     };
 
@@ -425,6 +436,32 @@ pub fn restore_agy(path: &Path) -> Result<bool, String> {
     Ok(restored)
 }
 
+pub fn set_update_lock(path: &Path, lock: bool) -> Result<bool, String> {
+    if !path.is_file() {
+        return Err(format!("agy binary not found: {}", path.display()));
+    }
+    let f = File::open(path).map_err(|e| format!("cannot open {}: {}", path.display(), e))?;
+    let mmap = unsafe { Mmap::map(&f) }.map_err(|e| format!("cannot mmap {}: {}", path.display(), e))?;
+
+    let (from, to) = if lock {
+        (UPDATER_URL, DISABLED_URL)
+    } else {
+        (DISABLED_URL, UPDATER_URL)
+    };
+
+    let found_off = memchr::memmem::find(&mmap, from);
+    drop(mmap);
+    drop(f);
+
+    if let Some(off) = found_off {
+        fast_apply_patches(path, &[(off, to)]).map_err(|e| format!("write update lock failed: {}", e))?;
+        drop_cached(path);
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 pub fn find_agy_binary() -> Option<PathBuf> {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
@@ -440,6 +477,9 @@ pub fn find_agy_binary() -> Option<PathBuf> {
     }
 
     candidates.push(PathBuf::from("/data/data/com.termux/files/usr/bin/agy"));
+    candidates.push(PathBuf::from("/root/.local/bin/agy"));
+    candidates.push(PathBuf::from("/workspace/bin/agy"));
+    candidates.push(PathBuf::from("/workspace/agy"));
 
     if !home.is_empty() {
         candidates.push(home_path.join(".local/bin/agy"));

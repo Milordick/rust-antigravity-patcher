@@ -26,6 +26,8 @@ fn main() {
         println!("  --check           Inspect and print status of all targets");
         println!("  --patch-all       Apply patches to all detected targets (headless)");
         println!("  --restore-all     Restore all detected targets from backups (headless)");
+        println!("  --lock-update     Neutralize embedded auto-updater URL (Lock ON)");
+        println!("  --unlock-update   Restore original auto-updater URL (Lock OFF)");
         println!("  --update          Self-update to the latest release directly from GitHub");
         println!("  --version, -v     Print version information");
         println!("  --help, -h        Print this help message");
@@ -45,6 +47,50 @@ fn main() {
             }
         }
         return;
+    }
+
+    if args.iter().any(|a| a == "--lock-update") {
+        if let Some(p) = find_agy_binary() {
+            match open_ag_patcher::targets::agy::set_update_lock(&p, true) {
+                Ok(true) => println!("[+] Auto-updater URL neutralized (lock ON): {}", p.display()),
+                Ok(false) => println!("[*] Auto-updater URL already neutralized (lock ON)"),
+                Err(e) => eprintln!("[!] Update lock error: {}", e),
+            }
+        } else {
+            eprintln!("[!] AGY binary not found");
+        }
+        let _ = std::fs::write("/workspace/.update_lock", "true");
+        return;
+    }
+
+    if args.iter().any(|a| a == "--unlock-update") {
+        if let Some(p) = find_agy_binary() {
+            match open_ag_patcher::targets::agy::set_update_lock(&p, false) {
+                Ok(true) => println!("[+] Auto-updater URL restored (lock OFF): {}", p.display()),
+                Ok(false) => println!("[*] Auto-updater URL intact (lock OFF)"),
+                Err(e) => eprintln!("[!] Update unlock error: {}", e),
+            }
+        } else {
+            eprintln!("[!] AGY binary not found");
+        }
+        let _ = std::fs::write("/workspace/.update_lock", "false");
+        return;
+    }
+
+    if args.len() == 2 && !args[1].starts_with('-') {
+        let target_path = std::path::Path::new(&args[1]);
+        if target_path.is_file() {
+            println!("Patching target binary: {}", target_path.display());
+            match apply_agy_patch(target_path) {
+                Ok(true) => println!("[+] Successfully patched: {}", target_path.display()),
+                Ok(false) => println!("[*] Binary is already patched: {}", target_path.display()),
+                Err(e) => {
+                    eprintln!("[!] Patch error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
     }
 
     if args.iter().any(|a| a == "--check") {

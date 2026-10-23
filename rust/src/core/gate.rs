@@ -270,7 +270,7 @@ impl MultiGate {
         data: &[u8],
         target_arch: Option<Arch>,
         bounds: Option<CodeBounds>,
-    ) -> Result<(GateStatus, usize, &'static str), String> {
+    ) -> Result<(GateStatus, usize, &'static str, &'static [u8]), String> {
         let mut last_err = String::new();
         let mut skipped = Vec::new();
 
@@ -283,7 +283,7 @@ impl MultiGate {
             }
             match gate.find(data, target_arch, Some(1), bounds) {
                 Ok((status, offsets)) if !offsets.is_empty() => {
-                    return Ok((status, offsets[0], gate.desc));
+                    return Ok((status, offsets[0], gate.desc, gate.fix));
                 }
                 Ok(_) => {}
                 Err(e) => last_err = e,
@@ -293,7 +293,7 @@ impl MultiGate {
         for gate in skipped {
             match gate.find(data, None, Some(1), bounds) {
                 Ok((status, offsets)) if !offsets.is_empty() => {
-                    return Ok((status, offsets[0], gate.desc));
+                    return Ok((status, offsets[0], gate.desc, gate.fix));
                 }
                 Ok(_) => {}
                 Err(e) => last_err = e,

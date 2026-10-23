@@ -138,7 +138,7 @@ pub fn check_manager_status(path: &Path) -> ManagerStatus {
     };
 
     let (is_patched, desc) = match gates.multi_gate.resolve(&mmap, Some(arch), bounds) {
-        Ok((status, _, desc)) => (status == GateStatus::Patched, Some(desc.to_string())),
+        Ok((status, _, desc, _)) => (status == GateStatus::Patched, Some(desc.to_string())),
         Err(_) => (false, None),
     };
 
@@ -168,7 +168,7 @@ pub fn apply_manager_patch(path: &Path) -> Result<bool, String> {
     let bounds = get_code_bounds(&mmap);
     let gates = ManagerGates::new().map_err(|e| e.to_string())?;
 
-    let (status, offset, _) = gates.multi_gate.resolve(&mmap, Some(arch), bounds)?;
+    let (status, offset, _, fix) = gates.multi_gate.resolve(&mmap, Some(arch), bounds)?;
     if status == GateStatus::Patched {
         return Ok(false); // already patched
     }
@@ -178,12 +178,6 @@ pub fn apply_manager_patch(path: &Path) -> Result<bool, String> {
 
     // Backup
     make_backup(path, BAK_EXT).map_err(|e| format!("backup failed: {}", e))?;
-
-    // Determine fix bytes
-    let fix: &[u8] = match arch {
-        Arch::Arm64 => b"\x23\x00\x80\x52\x03\x20\x00\x39",
-        _ => b"\xc6\x40\x08\x01\x90\x90",
-    };
 
     fast_apply_patches(path, &[(offset, fix)])
         .map_err(|e| format!("write patch failed: {}", e))?;

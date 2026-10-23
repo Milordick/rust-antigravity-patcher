@@ -1,6 +1,6 @@
 [package]
 name = "agyptch"
-version = "1.4.1"
+version = "1.4.2"
 edition = "2021"
 authors = ["Coshick", "AvenCores"]
 repository = "https://github.com/Milordick/rust-antigravity-patcher"

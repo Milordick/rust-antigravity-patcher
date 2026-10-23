@@ -11,6 +11,18 @@ pub fn fast_apply_patches(path: &Path, patches: &[(usize, &[u8])]) -> std::io::R
         return Ok(());
     }
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            let mut perms = meta.permissions();
+            if perms.mode() & 0o200 == 0 {
+                perms.set_mode(perms.mode() | 0o200);
+                let _ = fs::set_permissions(path, perms);
+            }
+        }
+    }
+
     // Try fast in-place direct seek + write
     match OpenOptions::new().read(true).write(true).open(path) {
         Ok(mut f) => {
