@@ -1,11 +1,11 @@
-# Open AG Patcher (Rust Edition) v1.4.1
+# Open AG Patcher (Rust Edition) v1.4.2
 
 <p align="center">
   <strong>Автономная, сверхбыстрая утилита для снятия региональных блокировок в экосистеме Google Antigravity.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/Milordick/rust-antigravity-patcher/releases/latest"><img src="https://img.shields.io/badge/LATEST%20RELEASE-V1.4.1-7950f2?style=for-the-badge&logo=github&logoColor=white" alt="Latest Release"></a>
+  <a href="https://github.com/Milordick/rust-antigravity-patcher/releases/latest"><img src="https://img.shields.io/badge/LATEST%20RELEASE-V1.4.2-7950f2?style=for-the-badge&logo=github&logoColor=white" alt="Latest Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-GPL%20V3-007ec6?style=for-the-badge" alt="License"></a>
   <img src="https://img.shields.io/badge/PLATFORM-LINUX%20%7C%20ANDROID%20%7C%20MACOS%20%7C%20WIN-4caf50?style=for-the-badge" alt="Platform">
 </p>
@@ -89,9 +89,9 @@ Google ограничивает доступ к экосистеме Antigravity
 
 Версия **Rust Edition** переписана с нуля и использует низкоуровневые механизмы системного программирования:
 
-### Бенчмарки (Python 1.3.9 vs Rust 1.4.1)
+### Бенчмарки (Python 1.3.9 vs Rust 1.4.2)
 
-| Характеристика                     | Python-версия (Оригинал)          | Rust Edition v1.4.1               | Улучшение                           |
+| Характеристика                     | Python-версия (Оригинал)          | Rust Edition v1.4.2               | Улучшение                           |
 |:---------------------------------- |:--------------------------------- |:--------------------------------- |:----------------------------------- |
 | **Холодный запуск программы**      | ~420 мс                           | **~4 мс**                         | **В 105 раз быстрее**               |
 | **Время применения патча**         | ~480 мс                           | **~40 микросекунд (0.00004 с)**   | **В 12 000 раз быстрее**            |

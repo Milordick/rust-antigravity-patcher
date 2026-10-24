@@ -172,18 +172,19 @@ fi
 
 mkdir -p "$BIN_DIR"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || pwd)"
 SOURCE_BIN=""
-
-# Check if binary exists in local repo
-if [ -f "${SCRIPT_DIR}/agyptch" ]; then
-    SOURCE_BIN="${SCRIPT_DIR}/agyptch"
-elif [ -f "${SCRIPT_DIR}/open-ag-patcher" ]; then
-    SOURCE_BIN="${SCRIPT_DIR}/open-ag-patcher"
-elif [ -f "${SCRIPT_DIR}/rust/target/release/agyptch" ]; then
-    SOURCE_BIN="${SCRIPT_DIR}/rust/target/release/agyptch"
-elif [ -f "${SCRIPT_DIR}/rust/target/release/open-ag-patcher" ]; then
-    SOURCE_BIN="${SCRIPT_DIR}/rust/target/release/open-ag-patcher"
+if [ -n "${BASH_SOURCE[0]}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    # Check if binary exists in local repo
+    if [ -f "${SCRIPT_DIR}/agyptch" ]; then
+        SOURCE_BIN="${SCRIPT_DIR}/agyptch"
+    elif [ -f "${SCRIPT_DIR}/open-ag-patcher" ]; then
+        SOURCE_BIN="${SCRIPT_DIR}/open-ag-patcher"
+    elif [ -f "${SCRIPT_DIR}/rust/target/release/agyptch" ]; then
+        SOURCE_BIN="${SCRIPT_DIR}/rust/target/release/agyptch"
+    elif [ -f "${SCRIPT_DIR}/rust/target/release/open-ag-patcher" ]; then
+        SOURCE_BIN="${SCRIPT_DIR}/rust/target/release/open-ag-patcher"
+    fi
 fi
 
 # --- Step 3: Obtain Binary ---
@@ -419,7 +420,7 @@ verify_installation() {
 run_animated "Проверка запуска и готовности утилиты" verify_installation
 
 # --- Final Success Summary Card ---
-VERSION_INFO="$("${BIN_DIR}/agyptch" --version 2>/dev/null || echo "v1.4.1 (Rust Edition)")"
+VERSION_INFO="$("${BIN_DIR}/agyptch" --version 2>/dev/null || echo "v1.4.2 (Rust Edition)")"
 
 echo ""
 echo -e "${COLOR_GREEN}╭────────────────────────────────────────────────────────────╮${COLOR_RESET}"

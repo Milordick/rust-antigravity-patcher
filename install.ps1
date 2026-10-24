@@ -77,35 +77,34 @@ $targetExe = Join-Path $installDir "agyptch.exe"
 $targetCmd = Join-Path $installDir "agyptch.cmd"
 $targetExeAlias = Join-Path $installDir "open-ag-patcher.exe"
 
-# Script directory
+# Script directory (only if executed from disk, not piped via iex)
 $scriptDir = $PSScriptRoot
-if (-not $scriptDir) {
+if (-not $scriptDir -and $MyInvocation.MyCommand.Path) {
     $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path 2>$null
-}
-if (-not $scriptDir) {
-    $scriptDir = (Get-Location).Path
 }
 
 # --- Step 3: Install Executable ---
 Write-StepAnimated "Установка исполняемого файла в $installDir" {
-    # 1. Check local precompiled binary
-    $localAgy = Join-Path $scriptDir "agyptch.exe"
-    $localExe = Join-Path $scriptDir "open-ag-patcher.exe"
-    $rustAgy = Join-Path $scriptDir "rust\target\release\agyptch.exe"
-    $rustTargetExe = Join-Path $scriptDir "rust\target\release\open-ag-patcher.exe"
+    # 1. Check local precompiled binary (if running from an existing local folder script)
+    if ($scriptDir) {
+        $localAgy = Join-Path $scriptDir "agyptch.exe"
+        $localExe = Join-Path $scriptDir "open-ag-patcher.exe"
+        $rustAgy = Join-Path $scriptDir "rust\target\release\agyptch.exe"
+        $rustTargetExe = Join-Path $scriptDir "rust\target\release\open-ag-patcher.exe"
 
-    if (Test-Path $localAgy) {
-        Copy-Item -Path $localAgy -Destination $targetExe -Force
-        return
-    } elseif (Test-Path $localExe) {
-        Copy-Item -Path $localExe -Destination $targetExe -Force
-        return
-    } elseif (Test-Path $rustAgy) {
-        Copy-Item -Path $rustAgy -Destination $targetExe -Force
-        return
-    } elseif (Test-Path $rustTargetExe) {
-        Copy-Item -Path $rustTargetExe -Destination $targetExe -Force
-        return
+        if (Test-Path $localAgy) {
+            Copy-Item -Path $localAgy -Destination $targetExe -Force
+            return
+        } elseif (Test-Path $localExe) {
+            Copy-Item -Path $localExe -Destination $targetExe -Force
+            return
+        } elseif (Test-Path $rustAgy) {
+            Copy-Item -Path $rustAgy -Destination $targetExe -Force
+            return
+        } elseif (Test-Path $rustTargetExe) {
+            Copy-Item -Path $rustTargetExe -Destination $targetExe -Force
+            return
+        }
     }
 
     # 2. If cargo is present in PATH, build release binary
@@ -242,7 +241,7 @@ Write-Host ""
 Write-Host "$ColorGreen╭────────────────────────────────────────────────────────────╮$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   $ColorBold Установка успешно завершена!                             $ColorReset$ColorGreen│$ColorReset"
 Write-Host "$ColorGreen├────────────────────────────────────────────────────────────┤$ColorReset"
-Write-Host "$ColorGreen│$ColorReset   Версия:    $ColorSurface Open AG Patcher v1.4.1 (Rust Edition)$ColorReset"
+Write-Host "$ColorGreen│$ColorReset   Версия:    $ColorSurface Open AG Patcher v1.4.2 (Rust Edition)$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   Команда:   $ColorBold$ColorBlue agyptch$ColorReset $ColorDim(или open-ag-patcher)$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   Путь:      $ColorGray $installDir\agyptch.cmd$ColorReset"
 Write-Host "$ColorGreen├────────────────────────────────────────────────────────────┤$ColorReset"
