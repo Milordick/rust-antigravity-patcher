@@ -165,22 +165,45 @@ pub fn get_ag_version(main_js_path: &Path) -> Option<String> {
 
 pub fn clear_ide_caches() {
     let mut dirs = Vec::new();
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            let base = PathBuf::from(appdata).join("Antigravity IDE");
-            dirs.push(base.join("CachedData"));
-            dirs.push(base.join("Code Cache").join("js"));
+    // Windows caches: Roaming APPDATA and Local LOCALAPPDATA
+    let mut win_bases = Vec::new();
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        win_bases.push(PathBuf::from(appdata));
+    } else if cfg!(windows) && !home.is_empty() {
+        win_bases.push(PathBuf::from(&home).join("AppData").join("Roaming"));
+    }
+
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        win_bases.push(PathBuf::from(localappdata));
+    } else if cfg!(windows) && !home.is_empty() {
+        win_bases.push(PathBuf::from(&home).join("AppData").join("Local"));
+    }
+
+    for base in win_bases {
+        for app_name in &["Antigravity IDE", "antigravity-ide", "Antigravity"] {
+            let app_dir = base.join(app_name);
+            dirs.push(app_dir.join("CachedData"));
+            dirs.push(app_dir.join("Code Cache").join("js"));
+            dirs.push(app_dir.join("Code Cache"));
+            dirs.push(app_dir.join("Cache"));
+            dirs.push(app_dir.join("GPUCache"));
         }
     }
 
     #[cfg(target_os = "macos")]
     {
-        let base = PathBuf::from(&home).join("Library").join("Application Support").join("Antigravity IDE");
-        dirs.push(base.join("CachedData"));
-        dirs.push(base.join("Code Cache").join("js"));
+        for app_name in &["Antigravity IDE", "antigravity-ide", "Antigravity"] {
+            let base = PathBuf::from(&home).join("Library").join("Application Support").join(app_name);
+            dirs.push(base.join("CachedData"));
+            dirs.push(base.join("Code Cache").join("js"));
+            dirs.push(base.join("Code Cache"));
+            dirs.push(base.join("Cache"));
+            dirs.push(base.join("GPUCache"));
+        }
     }
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
@@ -188,9 +211,14 @@ pub fn clear_ide_caches() {
         let cfg = std::env::var("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from(&home).join(".config"));
-        let base = cfg.join("Antigravity IDE");
-        dirs.push(base.join("CachedData"));
-        dirs.push(base.join("Code Cache").join("js"));
+        for app_name in &["Antigravity IDE", "antigravity-ide", "Antigravity"] {
+            let base = cfg.join(app_name);
+            dirs.push(base.join("CachedData"));
+            dirs.push(base.join("Code Cache").join("js"));
+            dirs.push(base.join("Code Cache"));
+            dirs.push(base.join("Cache"));
+            dirs.push(base.join("GPUCache"));
+        }
     }
 
     for d in dirs {
@@ -223,7 +251,7 @@ pub fn find_ide_main_js() -> Option<PathBuf> {
         candidates.push(home_path.join("Applications/Antigravity.app/Contents/Resources/app/out/main.js"));
     }
 
-    // System paths
+    // System paths (Unix/macOS)
     candidates.push(PathBuf::from("/opt/antigravity-ide/resources/app/out/main.js"));
     candidates.push(PathBuf::from("/opt/Antigravity IDE/resources/app/out/main.js"));
     candidates.push(PathBuf::from("/usr/lib/antigravity-ide/resources/app/out/main.js"));
@@ -231,23 +259,78 @@ pub fn find_ide_main_js() -> Option<PathBuf> {
     candidates.push(PathBuf::from("/Applications/Antigravity IDE.app/Contents/Resources/app/out/main.js"));
     candidates.push(PathBuf::from("/Applications/Antigravity.app/Contents/Resources/app/out/main.js"));
 
+    // Windows paths: standard and alternate locations
+    let app_folders = ["Antigravity IDE", "antigravity-ide", "Antigravity"];
+    let subpaths = ["resources/app/out/main.js", "resources/app/main.js"];
+
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lad = Path::new(&local_app_data);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(lad.join("Programs").join(folder).join(sub));
+                candidates.push(lad.join(folder).join(sub));
+            }
+        }
+    }
+
+    if let Ok(prog_files) = std::env::var("ProgramFiles") {
+        let pf = Path::new(&prog_files);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(pf.join(folder).join(sub));
+            }
+        }
+    }
+
+    if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
+        let pf = Path::new(&prog_files_x86);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(pf.join(folder).join(sub));
+            }
+        }
+    }
+
+    if let Ok(prog_w6432) = std::env::var("ProgramW6432") {
+        let pf = Path::new(&prog_w6432);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(pf.join(folder).join(sub));
+            }
+        }
+    }
+
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        let ad = Path::new(&app_data);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(ad.join(folder).join(sub));
+                candidates.push(ad.join("Programs").join(folder).join(sub));
+            }
+        }
+    }
+
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        let up = Path::new(&user_profile);
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(up.join("AppData/Local/Programs").join(folder).join(sub));
+                candidates.push(up.join("AppData/Local").join(folder).join(sub));
+                candidates.push(up.join("AppData/Roaming").join(folder).join(sub));
+                candidates.push(up.join("Downloads").join(folder).join(sub));
+                candidates.push(up.join("Загрузки").join(folder).join(sub));
+                candidates.push(up.join("Desktop").join(folder).join(sub));
+            }
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            let lad = Path::new(&local_app_data);
-            candidates.push(lad.join("Programs/Antigravity IDE/resources/app/out/main.js"));
-            candidates.push(lad.join("Programs/antigravity-ide/resources/app/out/main.js"));
-            candidates.push(lad.join("Antigravity IDE/resources/app/out/main.js"));
-        }
-        if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            let pf = Path::new(&prog_files);
-            candidates.push(pf.join("Antigravity IDE/resources/app/out/main.js"));
-            candidates.push(pf.join("antigravity-ide/resources/app/out/main.js"));
-        }
-        if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
-            let pf = Path::new(&prog_files_x86);
-            candidates.push(pf.join("Antigravity IDE/resources/app/out/main.js"));
-            candidates.push(pf.join("antigravity-ide/resources/app/out/main.js"));
+        for folder in &app_folders {
+            for sub in &subpaths {
+                candidates.push(PathBuf::from(r"C:\Program Files").join(folder).join(sub));
+                candidates.push(PathBuf::from(r"C:\Program Files (x86)").join(folder).join(sub));
+            }
         }
     }
 

@@ -86,6 +86,34 @@ mod tests {
         }
     }
 
+    fn pe_bytes(machine: u16) -> Vec<u8> {
+        let mut b = vec![0u8; 256];
+        b[0] = b'M';
+        b[1] = b'Z';
+        // e_lfanew at 0x3C points to PE header at 0x80
+        b[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        // Machine at e_lfanew + 4
+        b[0x84..0x86].copy_from_slice(&machine.to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn test_selects_windows_pe_binary_over_batch_shim() {
+        let real_pe = tmp_file("agy_win.exe", &pe_bytes(0x8664)); // x64 PE
+        let shim_bat = tmp_file("agy_win.bat", b"@echo off\r\ncall node agy.js\r\n");
+        let picked = select_best_binary(vec![shim_bat.clone(), real_pe.clone()]);
+        assert_eq!(picked, Some(real_pe.clone()));
+        cleanup(&[shim_bat, real_pe]);
+    }
+
+    #[test]
+    fn test_windows_pe_arm64_selection() {
+        let real_pe = tmp_file("language_server_windows_arm64.exe", &pe_bytes(0xAA64)); // Arm64 PE
+        let picked = select_best_binary(vec![real_pe.clone()]);
+        assert_eq!(picked, Some(real_pe.clone()));
+        cleanup(&[real_pe]);
+    }
+
     #[test]
     fn test_rejects_newer_larger_stub_in_favor_of_real_binary() {
         // Regression test for the Termux/Linux bug: a 20 KB shim named `agy`
@@ -134,5 +162,100 @@ mod tests {
         let picked = select_best_binary(vec![link.clone(), real.clone()]);
         assert!(picked == Some(link.clone()) || picked == Some(real.clone()));
         cleanup(&[link, real]);
+    }
+
+    #[test]
+    fn test_windows_ide_discovery_via_localappdata() {
+        let test_root = std::env::temp_dir().join("win_ide_test");
+        let main_js = test_root.join("Programs/Antigravity IDE/resources/app/out/main.js");
+        let _ = fs::create_dir_all(main_js.parent().unwrap());
+        fs::write(&main_js, b"console.log('antigravity');").unwrap();
+
+        let old_lad = std::env::var("LOCALAPPDATA").ok();
+        std::env::set_var("LOCALAPPDATA", test_root.to_str().unwrap());
+
+        let found = ide::find_ide_main_js();
+        if let Some(ref val) = old_lad {
+            std::env::set_var("LOCALAPPDATA", val);
+        } else {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = fs::remove_dir_all(&test_root);
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap(), "main.js");
+    }
+
+    #[test]
+    fn test_windows_manager_discovery_in_extensions_bin() {
+        let test_root = std::env::temp_dir().join("win_mgr_test");
+        let bin_path = test_root.join("Programs/Antigravity IDE/resources/app/extensions/antigravity/bin/language_server_windows_x64.exe");
+        let _ = fs::create_dir_all(bin_path.parent().unwrap());
+        fs::write(&bin_path, pe_bytes(0x8664)).unwrap();
+
+        let old_lad = std::env::var("LOCALAPPDATA").ok();
+        std::env::set_var("LOCALAPPDATA", test_root.to_str().unwrap());
+
+        let found = manager::find_manager_binary();
+        if let Some(ref val) = old_lad {
+            std::env::set_var("LOCALAPPDATA", val);
+        } else {
+            std::env::remove_var("LOCALAPPDATA");
+        }
+        let _ = fs::remove_dir_all(&test_root);
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap(), "language_server_windows_x64.exe");
+    }
+
+    #[test]
+    fn test_windows_agy_discovery_in_gemini() {
+        let test_root = std::env::temp_dir().join("win_agy_test");
+        let agy_path = test_root.join(".gemini/antigravity-cli/bin/agy.exe");
+        let _ = fs::create_dir_all(agy_path.parent().unwrap());
+        fs::write(&agy_path, pe_bytes(0x8664)).unwrap();
+
+        let old_up = std::env::var("USERPROFILE").ok();
+        std::env::set_var("USERPROFILE", test_root.to_str().unwrap());
+
+        let found = agy::find_agy_binary();
+        if let Some(ref val) = old_up {
+            std::env::set_var("USERPROFILE", val);
+        } else {
+            std::env::remove_var("USERPROFILE");
+        }
+        let _ = fs::remove_dir_all(&test_root);
+
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap(), "agy.exe");
+    }
+
+    #[test]
+    fn test_windows_vscode_discovery() {
+        let test_root = std::env::temp_dir().join("win_vscode_test");
+        let ext_js = test_root.join(".vscode/extensions/google.google-antigravity-0.9.0/extension.js");
+        let bin_path = test_root.join(".gemini/bin/antigravity.exe");
+        let _ = fs::create_dir_all(ext_js.parent().unwrap());
+        let _ = fs::create_dir_all(bin_path.parent().unwrap());
+        fs::write(&ext_js, b"module.exports = {};").unwrap();
+        fs::write(&bin_path, pe_bytes(0x8664)).unwrap();
+
+        let old_up = std::env::var("USERPROFILE").ok();
+        std::env::set_var("USERPROFILE", test_root.to_str().unwrap());
+
+        let found_js = vscode::find_extension_js();
+        let found_bin = vscode::find_gemini_antigravity_binary();
+
+        if let Some(ref val) = old_up {
+            std::env::set_var("USERPROFILE", val);
+        } else {
+            std::env::remove_var("USERPROFILE");
+        }
+        let _ = fs::remove_dir_all(&test_root);
+
+        assert!(found_js.is_some());
+        assert_eq!(found_js.unwrap().file_name().unwrap(), "extension.js");
+        assert!(found_bin.is_some());
+        assert_eq!(found_bin.unwrap().file_name().unwrap(), "antigravity.exe");
     }
 }

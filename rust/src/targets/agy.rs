@@ -463,10 +463,20 @@ pub fn set_update_lock(path: &Path, lock: bool) -> Result<bool, String> {
 }
 
 pub fn find_agy_binary() -> Option<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let home_path = Path::new(&home);
+    let mut homes = Vec::new();
+    if let Ok(h) = std::env::var("HOME") {
+        if !h.is_empty() {
+            homes.push(PathBuf::from(h));
+        }
+    }
+    if let Ok(u) = std::env::var("USERPROFILE") {
+        if !u.is_empty() {
+            let p = PathBuf::from(u);
+            if !homes.contains(&p) {
+                homes.push(p);
+            }
+        }
+    }
 
     let mut candidates = Vec::new();
 
@@ -481,11 +491,37 @@ pub fn find_agy_binary() -> Option<PathBuf> {
     candidates.push(PathBuf::from("/workspace/bin/agy"));
     candidates.push(PathBuf::from("/workspace/agy"));
 
-    if !home.is_empty() {
-        candidates.push(home_path.join(".local/bin/agy"));
-        candidates.push(home_path.join("bin/agy"));
-        #[cfg(target_os = "windows")]
-        candidates.push(home_path.join(".local/bin/agy.exe"));
+    for h in &homes {
+        candidates.push(h.join(".local/bin/agy"));
+        candidates.push(h.join(".local/bin/agy.exe"));
+        candidates.push(h.join("bin/agy"));
+        candidates.push(h.join("bin/agy.exe"));
+        // .gemini paths
+        candidates.push(h.join(".gemini/antigravity-cli/bin/agy.exe"));
+        candidates.push(h.join(".gemini/antigravity-cli/bin/agy"));
+        candidates.push(h.join(".gemini/antigravity-cli/agy.exe"));
+        candidates.push(h.join(".gemini/antigravity-cli/agy"));
+        candidates.push(h.join(".gemini/bin/agy.exe"));
+        candidates.push(h.join(".gemini/bin/agy"));
+        candidates.push(h.join(".gemini/bin/antigravity.exe"));
+        candidates.push(h.join(".gemini/bin/antigravity"));
+        // cargo bin
+        candidates.push(h.join(".cargo/bin/agy.exe"));
+        candidates.push(h.join(".cargo/bin/agy"));
+        // scoop in user home
+        candidates.push(h.join("scoop/shims/agy.exe"));
+        candidates.push(h.join("scoop/apps/antigravity-cli/current/agy.exe"));
+        candidates.push(h.join("scoop/apps/agy/current/agy.exe"));
+        candidates.push(h.join("AppData/Local/scoop/shims/agy.exe"));
+        candidates.push(h.join("AppData/Local/scoop/apps/antigravity-cli/current/agy.exe"));
+        candidates.push(h.join("AppData/Local/scoop/apps/agy/current/agy.exe"));
+        // npm in user profile
+        candidates.push(h.join("AppData/Roaming/npm/agy.exe"));
+        candidates.push(h.join("AppData/Roaming/npm/agy"));
+        candidates.push(h.join("AppData/Local/Programs/agy/bin/agy.exe"));
+        candidates.push(h.join("AppData/Local/Programs/agy/agy.exe"));
+        candidates.push(h.join("AppData/Local/Programs/antigravity-cli/bin/agy.exe"));
+        candidates.push(h.join("AppData/Local/Programs/antigravity-cli/agy.exe"));
     }
 
     candidates.push(PathBuf::from("/usr/local/bin/agy"));
@@ -493,28 +529,106 @@ pub fn find_agy_binary() -> Option<PathBuf> {
     candidates.push(PathBuf::from("/opt/antigravity/bin/agy"));
     candidates.push(PathBuf::from("/opt/antigravity/agy"));
     candidates.push(PathBuf::from("./agy"));
-    #[cfg(target_os = "windows")]
     candidates.push(PathBuf::from("./agy.exe"));
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            let lad = Path::new(&local_app_data);
-            candidates.push(lad.join("Programs/agy/bin/agy.exe"));
-            candidates.push(lad.join("Programs/agy/agy.exe"));
-            candidates.push(lad.join("agy/bin/agy.exe"));
-        }
-        if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            let pf = Path::new(&prog_files);
-            candidates.push(pf.join("agy/bin/agy.exe"));
-            candidates.push(pf.join("agy/agy.exe"));
-        }
+    // CARGO_HOME
+    if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
+        let ch = Path::new(&cargo_home);
+        candidates.push(ch.join("bin/agy.exe"));
+        candidates.push(ch.join("bin/agy"));
     }
 
-    // Search PATH
+    // SCOOP
+    if let Ok(scoop_dir) = std::env::var("SCOOP") {
+        let sc = Path::new(&scoop_dir);
+        candidates.push(sc.join("shims/agy.exe"));
+        candidates.push(sc.join("apps/antigravity-cli/current/agy.exe"));
+        candidates.push(sc.join("apps/agy/current/agy.exe"));
+    }
+
+    // Chocolatey
+    if let Ok(choco_dir) = std::env::var("ChocolateyInstall") {
+        let ch = Path::new(&choco_dir);
+        candidates.push(ch.join("bin/agy.exe"));
+        candidates.push(ch.join("lib/antigravity-cli/tools/agy.exe"));
+        candidates.push(ch.join("lib/agy/tools/agy.exe"));
+    }
+    if let Ok(prog_data) = std::env::var("ProgramData") {
+        let pd = Path::new(&prog_data);
+        candidates.push(pd.join("chocolatey/bin/agy.exe"));
+        candidates.push(pd.join("Chocolatey/bin/agy.exe"));
+        candidates.push(pd.join("chocolatey/lib/antigravity-cli/tools/agy.exe"));
+        candidates.push(pd.join("chocolatey/lib/agy/tools/agy.exe"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(PathBuf::from(r"C:\ProgramData\chocolatey\bin\agy.exe"));
+        candidates.push(PathBuf::from(r"C:\Chocolatey\bin\agy.exe"));
+    }
+
+    // Windows LOCALAPPDATA
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lad = Path::new(&local_app_data);
+        candidates.push(lad.join("Programs/agy/bin/agy.exe"));
+        candidates.push(lad.join("Programs/agy/agy.exe"));
+        candidates.push(lad.join("Programs/antigravity-cli/bin/agy.exe"));
+        candidates.push(lad.join("Programs/antigravity-cli/agy.exe"));
+        candidates.push(lad.join("Programs/Antigravity/bin/agy.exe"));
+        candidates.push(lad.join("Programs/Antigravity/agy.exe"));
+        candidates.push(lad.join("agy/bin/agy.exe"));
+        candidates.push(lad.join("agy/agy.exe"));
+        candidates.push(lad.join("antigravity-cli/bin/agy.exe"));
+        candidates.push(lad.join("antigravity-cli/agy.exe"));
+        candidates.push(lad.join("Antigravity/bin/agy.exe"));
+        candidates.push(lad.join("npm/agy.exe"));
+        candidates.push(lad.join("npm/agy"));
+        candidates.push(lad.join("scoop/shims/agy.exe"));
+        candidates.push(lad.join("scoop/apps/antigravity-cli/current/agy.exe"));
+        candidates.push(lad.join("scoop/apps/agy/current/agy.exe"));
+    }
+
+    // Windows APPDATA (Roaming)
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        let ad = Path::new(&app_data);
+        candidates.push(ad.join("npm/agy.exe"));
+        candidates.push(ad.join("npm/agy"));
+        candidates.push(ad.join("npm/node_modules/@google/antigravity-cli/bin/agy.exe"));
+        candidates.push(ad.join("npm/node_modules/antigravity-cli/bin/agy.exe"));
+        candidates.push(ad.join("agy/bin/agy.exe"));
+        candidates.push(ad.join("agy/agy.exe"));
+        candidates.push(ad.join("antigravity-cli/bin/agy.exe"));
+    }
+
+    // Windows ProgramFiles / ProgramFiles(x86) / ProgramW6432
+    let mut pf_dirs = Vec::new();
+    if let Ok(prog_files) = std::env::var("ProgramFiles") {
+        pf_dirs.push(PathBuf::from(prog_files));
+    }
+    if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
+        pf_dirs.push(PathBuf::from(prog_files_x86));
+    }
+    if let Ok(prog_w6432) = std::env::var("ProgramW6432") {
+        pf_dirs.push(PathBuf::from(prog_w6432));
+    }
+
+    for pf in pf_dirs {
+        candidates.push(pf.join("agy/bin/agy.exe"));
+        candidates.push(pf.join("agy/agy.exe"));
+        candidates.push(pf.join("antigravity-cli/bin/agy.exe"));
+        candidates.push(pf.join("antigravity-cli/agy.exe"));
+        candidates.push(pf.join("Antigravity/bin/agy.exe"));
+        candidates.push(pf.join("Antigravity/agy.exe"));
+        candidates.push(pf.join("nodejs/agy.exe"));
+        candidates.push(pf.join("nodejs/agy"));
+    }
+
+    // Search PATH with split_paths
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
-            candidates.push(dir.join(if cfg!(windows) { "agy.exe" } else { "agy" }));
+            candidates.push(dir.join("agy.exe"));
+            candidates.push(dir.join("agy"));
+            candidates.push(dir.join("antigravity.exe"));
+            candidates.push(dir.join("antigravity"));
         }
     }
 

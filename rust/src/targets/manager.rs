@@ -215,18 +215,99 @@ pub fn find_manager_binary() -> Option<PathBuf> {
         PathBuf::from("/usr/share/antigravity-ide/resources/app/extensions/antigravity/bin/language_server_linux_x64"),
     ];
 
+    // Windows IDE locations: search across LOCALAPPDATA, ProgramFiles, ProgramFiles(x86), ProgramW6432, APPDATA, USERPROFILE
+    let app_folders = ["Antigravity IDE", "antigravity-ide", "Antigravity"];
+    let mut ide_bases = Vec::new();
+
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lad = Path::new(&local_app_data);
+        for folder in &app_folders {
+            ide_bases.push(lad.join("Programs").join(folder));
+            ide_bases.push(lad.join(folder));
+        }
+    }
+
+    if let Ok(prog_files) = std::env::var("ProgramFiles") {
+        let pf = Path::new(&prog_files);
+        for folder in &app_folders {
+            ide_bases.push(pf.join(folder));
+        }
+    }
+
+    if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
+        let pf = Path::new(&prog_files_x86);
+        for folder in &app_folders {
+            ide_bases.push(pf.join(folder));
+        }
+    }
+
+    if let Ok(prog_w6432) = std::env::var("ProgramW6432") {
+        let pf = Path::new(&prog_w6432);
+        for folder in &app_folders {
+            ide_bases.push(pf.join(folder));
+        }
+    }
+
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        let ad = Path::new(&app_data);
+        for folder in &app_folders {
+            ide_bases.push(ad.join(folder));
+            ide_bases.push(ad.join("Programs").join(folder));
+        }
+    }
+
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        let up = Path::new(&user_profile);
+        for folder in &app_folders {
+            ide_bases.push(up.join("AppData/Local/Programs").join(folder));
+            ide_bases.push(up.join("AppData/Local").join(folder));
+            ide_bases.push(up.join("AppData/Roaming").join(folder));
+            ide_bases.push(up.join("Downloads").join(folder));
+            ide_bases.push(up.join("Загрузки").join(folder));
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
-        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
-            let lad = Path::new(&local_app_data);
-            candidates.push(lad.join("Programs/antigravity-ide/resources/bin/language_server.exe"));
-            candidates.push(lad.join("Programs/Antigravity IDE/resources/bin/language_server.exe"));
-            candidates.push(lad.join("antigravity-ide/resources/bin/language_server.exe"));
+        for folder in &app_folders {
+            ide_bases.push(PathBuf::from(r"C:\Program Files").join(folder));
+            ide_bases.push(PathBuf::from(r"C:\Program Files (x86)").join(folder));
         }
-        if let Ok(prog_files) = std::env::var("ProgramFiles") {
-            let pf = Path::new(&prog_files);
-            candidates.push(pf.join("Antigravity IDE/resources/bin/language_server.exe"));
-            candidates.push(pf.join("antigravity-ide/resources/bin/language_server.exe"));
+    }
+
+    let bin_subpaths = [
+        "resources/app/extensions/antigravity/bin",
+        "resources/bin",
+        "extensions/antigravity/bin",
+        "bin",
+    ];
+
+    let bin_names = [
+        "language_server_windows_x64.exe",
+        "language_server_windows_arm64.exe",
+        "language_server.exe",
+        "language_server_windows_x64",
+        "language_server_windows_arm64",
+        "language_server",
+    ];
+
+    for base in ide_bases {
+        for sub in &bin_subpaths {
+            let bin_dir = base.join(sub);
+            for name in &bin_names {
+                candidates.push(bin_dir.join(name));
+            }
+            if bin_dir.is_dir() {
+                if let Ok(entries) = fs::read_dir(&bin_dir) {
+                    for entry in entries.flatten() {
+                        let p = entry.path();
+                        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                        if name.starts_with("language_server") && !name.ends_with(".agybak") && !name.ends_with(".bak") && p.is_file() {
+                            candidates.push(p);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -236,14 +317,18 @@ pub fn find_manager_binary() -> Option<PathBuf> {
             let bin_dirs = [
                 app_dir.join("extensions/antigravity/bin"),
                 app_dir.parent().unwrap_or(app_dir).join("bin"),
+                app_dir.join("bin"),
             ];
             for bin_dir in bin_dirs {
+                for name in &bin_names {
+                    candidates.push(bin_dir.join(name));
+                }
                 if bin_dir.is_dir() {
-                    if let Ok(entries) = fs::read_dir(bin_dir) {
+                    if let Ok(entries) = fs::read_dir(&bin_dir) {
                         for entry in entries.flatten() {
                             let p = entry.path();
                             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                            if name.starts_with("language_server") && !name.ends_with(".agybak") && p.is_file() {
+                            if name.starts_with("language_server") && !name.ends_with(".agybak") && !name.ends_with(".bak") && p.is_file() {
                                 candidates.push(p);
                             }
                         }
@@ -256,7 +341,10 @@ pub fn find_manager_binary() -> Option<PathBuf> {
     // Search PATH
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
-            candidates.push(dir.join(if cfg!(windows) { "language_server.exe" } else { "language_server" }));
+            candidates.push(dir.join("language_server_windows_x64.exe"));
+            candidates.push(dir.join("language_server_windows_arm64.exe"));
+            candidates.push(dir.join("language_server.exe"));
+            candidates.push(dir.join("language_server"));
         }
     }
 

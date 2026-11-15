@@ -1,10 +1,13 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Open AG Patcher (Rust Edition) - Universal Windows Installer
 # Installs 'open-ag-patcher.exe' and registers 'agyptch' command in PATH.
 # ==============================================================================
 
 [CmdletBinding()]
-param()
+param(
+    [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArgs
+)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -45,6 +48,57 @@ function Write-StepAnimated {
         Write-Host "`r  $ColorRed[-]$ColorReset $ColorBold$($Label.PadRight(48))$ColorReset $ColorRed[Ошибка]$ColorReset"
         Write-Host "$ColorDim$_$ColorReset"
         throw $_
+    }
+}
+
+function Broadcast-EnvironmentChange {
+    # Only broadcast on Windows systems
+    $isWin = ($env:OS -eq "Windows_NT") -or ($PSVersionTable.PSVersion.Major -le 5) -or ($IsWindows -eq $true)
+    if (-not $isWin) { return }
+
+    try {
+        if (-not ("Win32Native.Win32EnvironmentBroadcaster" -as [type])) {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+namespace Win32Native {
+    public static class Win32EnvironmentBroadcaster {
+        [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        public static extern IntPtr SendMessageTimeout(
+            IntPtr hWnd,
+            uint Msg,
+            UIntPtr wParam,
+            string lParam,
+            uint fuFlags,
+            uint uTimeout,
+            out UIntPtr lpdwResult
+        );
+
+        public static void NotifyEnvironmentChange() {
+            try {
+                IntPtr HWND_BROADCAST = new IntPtr(0xffff);
+                uint WM_SETTINGCHANGE = 0x001A;
+                uint SMTO_ABORTIFHUNG = 0x0002;
+                UIntPtr result;
+                SendMessageTimeout(
+                    HWND_BROADCAST,
+                    WM_SETTINGCHANGE,
+                    UIntPtr.Zero,
+                    "Environment",
+                    SMTO_ABORTIFHUNG,
+                    5000,
+                    out result
+                );
+            } catch {}
+        }
+    }
+}
+"@ -ErrorAction Stop
+        }
+        [Win32Native.Win32EnvironmentBroadcaster]::NotifyEnvironmentChange()
+    } catch {
+        # Fallback / ignore if P/Invoke compilation is blocked
     }
 }
 
@@ -107,13 +161,23 @@ Write-StepAnimated "Установка исполняемого файла в $i
         }
     }
 
-    # 2. If cargo is present in PATH, build release binary
+    # 2. If cargo is present in PATH or ~/.cargo/bin, build release binary
     $cargoCmd = Get-Command "cargo" -ErrorAction SilentlyContinue
+    if (-not $cargoCmd -and $env:USERPROFILE) {
+        $userCargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
+        if (Test-Path $userCargo) {
+            $cargoCmd = $userCargo
+        }
+    }
     if ($cargoCmd) {
         $rustDir = Join-Path $scriptDir "rust"
         if (Test-Path $rustDir) {
             Push-Location $rustDir
-            & cargo build --release --quiet
+            if ($cargoCmd -is [System.Management.Automation.CommandInfo]) {
+                & $cargoCmd.Definition build --release --quiet
+            } else {
+                & "$cargoCmd" build --release --quiet
+            }
             Pop-Location
             if (Test-Path $rustAgy) {
                 Copy-Item -Path $rustAgy -Destination $targetExe -Force
@@ -197,27 +261,88 @@ Write-StepAnimated "Создание команды 'agyptch' ($targetCmd)" {
 
 # --- Step 5: Configure User PATH Environment ---
 Write-StepAnimated "Регистрация $installDir в системном окружении PATH" {
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (-not $userPath) { $userPath = "" }
+    $normalizedInstall = $installDir.Trim().Trim('"').TrimEnd('\', '/')
 
-    $paths = $userPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)
-    $normalizedInstall = $installDir.TrimEnd('\')
+    # 1. Access user environment directly from registry to avoid REG_EXPAND_SZ corruption
+    $regKey = $null
+    $rawUserPath = ""
+    $valueKind = [Microsoft.Win32.RegistryValueKind]::ExpandString
 
-    $exists = $false
-    foreach ($p in $paths) {
-        if ($p.TrimEnd('\') -eq $normalizedInstall) {
-            $exists = $true
-            break
+    try {
+        $regKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+        if ($null -eq $regKey) {
+            $regKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+        }
+
+        # Read unexpanded raw string (preserves %USERPROFILE%, %LOCALAPPDATA%, etc.)
+        $rawVal = $regKey.GetValue("Path", "", [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+        if ($null -ne $rawVal) {
+            $rawUserPath = [string]$rawVal
+        }
+
+        # Check existing value kind if present, ensuring ExpandString is preserved
+        try {
+            $existingKind = $regKey.GetValueKind("Path")
+            if ($existingKind -eq [Microsoft.Win32.RegistryValueKind]::String -or $existingKind -eq [Microsoft.Win32.RegistryValueKind]::ExpandString) {
+                $valueKind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+            } else {
+                $valueKind = $existingKind
+            }
+        } catch {
+            $valueKind = [Microsoft.Win32.RegistryValueKind]::ExpandString
+        }
+
+        # 2. Check if already present with case-insensitive and trailing backslash normalization
+        $paths = $rawUserPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)
+        $exists = $false
+        foreach ($p in $paths) {
+            $cleanP = $p.Trim().Trim('"').TrimEnd('\', '/')
+            if ([string]::Equals($cleanP, $normalizedInstall, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $exists = $true
+                break
+            }
+            # Also compare against expanded environment variables in existing entries
+            try {
+                $expandedP = [Environment]::ExpandEnvironmentVariables($cleanP).TrimEnd('\', '/')
+                if ([string]::Equals($expandedP, $normalizedInstall, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $exists = $true
+                    break
+                }
+            } catch {}
+        }
+
+        # 3. Add to User PATH if not present
+        if (-not $exists) {
+            $cleanUserPath = $rawUserPath.Trim().TrimEnd(';')
+            $newUserPath = if ([string]::IsNullOrEmpty($cleanUserPath)) {
+                $installDir
+            } else {
+                "$cleanUserPath;$installDir"
+            }
+            $regKey.SetValue("Path", $newUserPath, $valueKind)
+        }
+    } finally {
+        if ($null -ne $regKey) {
+            $regKey.Close()
         }
     }
 
-    if (-not $exists) {
-        $newUserPath = if ($userPath) { "$userPath;$installDir" } else { $installDir }
-        [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
-    }
+    # 4. Broadcast WM_SETTINGCHANGE notification to all top-level windows
+    Broadcast-EnvironmentChange
 
-    # Update current session PATH so agyptch works immediately
-    $env:Path = "$installDir;$env:Path"
+    # 5. Update current session PATH so agyptch works immediately
+    $currentPaths = $env:Path.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)
+    $inCurrent = $false
+    foreach ($p in $currentPaths) {
+        $cleanP = $p.Trim().Trim('"').TrimEnd('\', '/')
+        if ([string]::Equals($cleanP, $normalizedInstall, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $inCurrent = $true
+            break
+        }
+    }
+    if (-not $inCurrent) {
+        $env:Path = "$installDir;$env:Path"
+    }
 }
 
 # --- Step 6: Verify Installation ---
@@ -241,7 +366,7 @@ Write-Host ""
 Write-Host "$ColorGreen╭────────────────────────────────────────────────────────────╮$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   $ColorBold Установка успешно завершена!                             $ColorReset$ColorGreen│$ColorReset"
 Write-Host "$ColorGreen├────────────────────────────────────────────────────────────┤$ColorReset"
-Write-Host "$ColorGreen│$ColorReset   Версия:    $ColorSurface Open AG Patcher v1.4.2 (Rust Edition)$ColorReset"
+Write-Host "$ColorGreen│$ColorReset   Версия:    $ColorSurface Open AG Patcher v1.4.3 (Rust Edition)$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   Команда:   $ColorBold$ColorBlue agyptch$ColorReset $ColorDim(или open-ag-patcher)$ColorReset"
 Write-Host "$ColorGreen│$ColorReset   Путь:      $ColorGray $installDir\agyptch.cmd$ColorReset"
 Write-Host "$ColorGreen├────────────────────────────────────────────────────────────┤$ColorReset"
@@ -251,5 +376,6 @@ Write-Host "$ColorGreen│$ColorReset     $ColorBlue agyptch --check$ColorReset 
 Write-Host "$ColorGreen│$ColorReset     $ColorBlue agyptch --patch-all$ColorReset  Пропатчить всё одной командой       $ColorGreen│$ColorReset"
 Write-Host "$ColorGreen╰────────────────────────────────────────────────────────────╯$ColorReset"
 Write-Host ""
-Write-Host "$ColorGray Подсказка: откройте новое окно PowerShell / CMD для автоматического применения PATH.$ColorReset"
+Write-Host "$ColorGray Подсказка: окружение PATH обновлено в реестре и оповещение разослано в систему (WM_SETTINGCHANGE).$ColorReset"
+Write-Host "$ColorGray Новые окна PowerShell и CMD подхватят команду 'agyptch' автоматически.$ColorReset"
 Write-Host ""

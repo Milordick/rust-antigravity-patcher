@@ -156,10 +156,20 @@ pub fn restore_vscode(path: &Path) -> Result<bool, String> {
 }
 
 pub fn find_extension_js() -> Option<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let home_path = Path::new(&home);
+    let mut homes = Vec::new();
+    if let Ok(h) = std::env::var("HOME") {
+        if !h.is_empty() {
+            homes.push(PathBuf::from(h));
+        }
+    }
+    if let Ok(u) = std::env::var("USERPROFILE") {
+        if !u.is_empty() {
+            let p = PathBuf::from(u);
+            if !homes.contains(&p) {
+                homes.push(p);
+            }
+        }
+    }
 
     let mut roots = Vec::new();
 
@@ -169,15 +179,45 @@ pub fn find_extension_js() -> Option<PathBuf> {
         }
     }
 
-    if !home.is_empty() {
-        roots.push(home_path.join(".vscode/extensions"));
-        roots.push(home_path.join(".vscode-insiders/extensions"));
-        roots.push(home_path.join(".vscode-oss/extensions"));
-        roots.push(home_path.join(".vscode-server/extensions"));
-        roots.push(home_path.join(".vscode-server-insiders/extensions"));
+    for h in &homes {
+        roots.push(h.join(".vscode/extensions"));
+        roots.push(h.join(".vscode-insiders/extensions"));
+        roots.push(h.join(".vscode-oss/extensions"));
+        roots.push(h.join(".vscode-server/extensions"));
+        roots.push(h.join(".vscode-server-insiders/extensions"));
+        roots.push(h.join(".vscodium/extensions"));
+        roots.push(h.join(".cursor/extensions"));
+        roots.push(h.join(".windsurf/extensions"));
     }
 
-    let prefix = "google.google-antigravity-";
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let ad = Path::new(&appdata);
+        roots.push(ad.join(".vscode/extensions"));
+        roots.push(ad.join("Code/extensions"));
+        roots.push(ad.join("Code - Insiders/extensions"));
+        roots.push(ad.join("VSCodium/extensions"));
+    }
+
+    if let Ok(lad) = std::env::var("LOCALAPPDATA") {
+        let p = Path::new(&lad);
+        roots.push(p.join("Programs/Microsoft VS Code/resources/app/extensions"));
+        roots.push(p.join("Programs/Microsoft VS Code Insiders/resources/app/extensions"));
+        roots.push(p.join(".vscode/extensions"));
+    }
+
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        let p = Path::new(&pf);
+        roots.push(p.join("Microsoft VS Code/resources/app/extensions"));
+        roots.push(p.join("Microsoft VS Code Insiders/resources/app/extensions"));
+    }
+
+    if let Ok(pfx86) = std::env::var("ProgramFiles(x86)") {
+        let p = Path::new(&pfx86);
+        roots.push(p.join("Microsoft VS Code/resources/app/extensions"));
+    }
+
+    let prefix1 = "google.google-antigravity-";
+    let prefix2 = "google.antigravity-";
     let mut best_path = None;
     let mut best_mtime = std::time::SystemTime::UNIX_EPOCH;
 
@@ -186,7 +226,7 @@ pub fn find_extension_js() -> Option<PathBuf> {
             for entry in entries.flatten() {
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
-                if name_str.starts_with(prefix) && entry.path().is_dir() {
+                if (name_str.starts_with(prefix1) || name_str.starts_with(prefix2)) && entry.path().is_dir() {
                     let js_cand = entry.path().join("extension.js");
                     if js_cand.is_file() {
                         let mtime = entry.metadata().ok()
@@ -206,19 +246,83 @@ pub fn find_extension_js() -> Option<PathBuf> {
 }
 
 pub fn find_gemini_antigravity_binary() -> Option<PathBuf> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    let home_path = Path::new(&home);
+    let mut homes = Vec::new();
+    if let Ok(h) = std::env::var("HOME") {
+        if !h.is_empty() {
+            homes.push(PathBuf::from(h));
+        }
+    }
+    if let Ok(u) = std::env::var("USERPROFILE") {
+        if !u.is_empty() {
+            let p = PathBuf::from(u);
+            if !homes.contains(&p) {
+                homes.push(p);
+            }
+        }
+    }
 
-    let candidates = vec![
-        home_path.join(".gemini/bin/antigravity"),
-        home_path.join(".gemini/bin/agy"),
-        #[cfg(target_os = "windows")]
-        home_path.join(".gemini/bin/antigravity.exe"),
-        #[cfg(target_os = "windows")]
-        home_path.join(".gemini/bin/agy.exe"),
-    ];
+    let mut candidates = Vec::new();
+
+    for h in &homes {
+        candidates.push(h.join(".gemini/bin/antigravity.exe"));
+        candidates.push(h.join(".gemini/bin/antigravity"));
+        candidates.push(h.join(".gemini/bin/agy.exe"));
+        candidates.push(h.join(".gemini/bin/agy"));
+        candidates.push(h.join(".gemini/antigravity-cli/bin/antigravity.exe"));
+        candidates.push(h.join(".gemini/antigravity-cli/bin/antigravity"));
+        candidates.push(h.join(".gemini/antigravity-cli/bin/agy.exe"));
+        candidates.push(h.join(".gemini/antigravity-cli/bin/agy"));
+    }
+
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        let ad = Path::new(&appdata);
+        candidates.push(ad.join(".gemini/bin/antigravity.exe"));
+        candidates.push(ad.join(".gemini/bin/antigravity"));
+        candidates.push(ad.join(".gemini/bin/agy.exe"));
+        candidates.push(ad.join(".gemini/bin/agy"));
+        candidates.push(ad.join("antigravity/bin/antigravity.exe"));
+        candidates.push(ad.join("antigravity/bin/antigravity"));
+        candidates.push(ad.join("agy/bin/agy.exe"));
+        candidates.push(ad.join("agy/bin/agy"));
+    }
+
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let lad = Path::new(&local_app_data);
+        candidates.push(lad.join(".gemini/bin/antigravity.exe"));
+        candidates.push(lad.join(".gemini/bin/antigravity"));
+        candidates.push(lad.join("Programs/antigravity/bin/antigravity.exe"));
+        candidates.push(lad.join("Programs/antigravity/antigravity.exe"));
+        candidates.push(lad.join("Programs/agy/bin/antigravity.exe"));
+        candidates.push(lad.join("Programs/agy/bin/agy.exe"));
+    }
+
+    let mut pf_dirs = Vec::new();
+    if let Ok(prog_files) = std::env::var("ProgramFiles") {
+        pf_dirs.push(PathBuf::from(prog_files));
+    }
+    if let Ok(prog_files_x86) = std::env::var("ProgramFiles(x86)") {
+        pf_dirs.push(PathBuf::from(prog_files_x86));
+    }
+    if let Ok(prog_w6432) = std::env::var("ProgramW6432") {
+        pf_dirs.push(PathBuf::from(prog_w6432));
+    }
+
+    for pf in pf_dirs {
+        candidates.push(pf.join("antigravity/bin/antigravity.exe"));
+        candidates.push(pf.join("antigravity/antigravity.exe"));
+        candidates.push(pf.join("agy/bin/antigravity.exe"));
+        candidates.push(pf.join("agy/bin/agy.exe"));
+    }
+
+    // Search PATH
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            candidates.push(dir.join("antigravity.exe"));
+            candidates.push(dir.join("antigravity"));
+            candidates.push(dir.join("agy.exe"));
+            candidates.push(dir.join("agy"));
+        }
+    }
 
     super::select_best_binary(candidates)
 }
